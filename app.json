@@ -1,0 +1,43 @@
+{
+  "expo": {
+    "name": "Sarvodaya Adhyeta",
+    "slug": "sarvodaya-adhyeta",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "scheme": "sarvodayaadhyeta",
+    "userInterfaceStyle": "automatic",
+    "splash": {
+      "image": "./assets/splash.png",
+      "resizeMode": "cover",
+      "backgroundColor": "#17358a"
+    },
+    "android": {
+      "package": "com.sarvodayaadhyeta.app",
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#17358a"
+      },
+      "permissions": ["NOTIFICATIONS"]
+    },
+    "ios": {
+      "bundleIdentifier": "com.sarvodayaadhyeta.app",
+      "supportsTablet": false
+    },
+    "plugins": [
+      "expo-router",
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/notification-icon.png",
+          "color": "#17358a"
+        }
+      ]
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "REPLACE_AFTER_EAS_INIT"
+      }
+    }
+  }
+}
