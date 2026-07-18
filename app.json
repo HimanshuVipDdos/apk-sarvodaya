@@ -33,6 +33,14 @@
           "icon": "./assets/notification-icon.png",
           "color": "#17358a"
         }
+      ],
+      [
+        "expo-build-properties",
+        {
+          "android": {
+            "kotlinVersion": "1.9.25"
+          }
+        }
       ]
     ],
     "extra": {
