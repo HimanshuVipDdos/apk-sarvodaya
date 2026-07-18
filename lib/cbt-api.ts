@@ -84,13 +84,6 @@ export function getCbtAttemptResult(attemptId: string) {
   return callCbtApi<ResultResponse>("result", { attempt_id: attemptId });
 }
 
-export type LeaderboardEntry = { rank: number; name: string; score: number; max_score: number; is_me: boolean };
-export type LeaderboardResponse = { test_title: string; entries: LeaderboardEntry[] };
-
-export function getCbtLeaderboard(testId: string) {
-  return callCbtApi<LeaderboardResponse>("leaderboard", { test_id: testId });
-}
-
 export function getCbtLeaderboard(testId: string) {
   return callCbtApi<LeaderboardResponse>("leaderboard", { test_id: testId });
 }
