@@ -1,15 +1,28 @@
 import { useCallback, useState } from "react";
-import { View, Text, ScrollView, StyleSheet, RefreshControl, ActivityIndicator, TouchableOpacity } from "react-native";
+import { View, Text, ScrollView, StyleSheet, RefreshControl, ActivityIndicator, TouchableOpacity, Image } from "react-native";
 import { useFocusEffect, useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/lib/auth-context";
 import { theme } from "@/lib/theme";
+import { HeroSlider } from "@/components/HeroSlider";
 
+// Matches the real `batches` table schema (see app/(tabs)/batches.tsx note).
 type Enrollment = {
   id: string;
-  batch: { id: string; title?: string | null; name?: string | null } | null;
+  batch: {
+    id: string;
+    title?: string | null;
+    thumbnail_url?: string | null;
+    fees_inr?: number | null;
+    exam_category?: string | null;
+  } | null;
 };
+
+function formatInr(n?: number | null) {
+  if (n == null) return null;
+  return `₹${n.toLocaleString("en-IN")}`;
+}
 
 export default function DashboardScreen() {
   const { session } = useAuth();
@@ -25,7 +38,10 @@ export default function DashboardScreen() {
 
     const [profileRes, enrollmentsRes] = await Promise.all([
       supabase.from("profiles").select("full_name").eq("id", userId).maybeSingle(),
-      supabase.from("enrollments").select("id, batch:batches(*)").eq("user_id", userId),
+      supabase
+        .from("enrollments")
+        .select("id, batch:batches(id, title, thumbnail_url, fees_inr, exam_category)")
+        .eq("user_id", userId),
     ]);
 
     setFullName(profileRes.data?.full_name ?? "Student");
@@ -69,6 +85,11 @@ export default function DashboardScreen() {
         </View>
       </View>
 
+      {/* Homepage promo slider — same hero_slides content as the website */}
+      <View style={{ marginTop: 16 }}>
+        <HeroSlider />
+      </View>
+
       <View style={{ paddingHorizontal: 20, marginTop: 20 }}>
         <Text style={styles.sectionTitle}>Your Batches</Text>
         {enrollments.length === 0 ? (
@@ -81,16 +102,28 @@ export default function DashboardScreen() {
             <TouchableOpacity
               key={e.id}
               style={styles.batchCard}
-              activeOpacity={0.8}
+              activeOpacity={0.85}
               onPress={() =>
                 e.batch?.id &&
                 router.push({ pathname: "/batch/[batchId]", params: { batchId: e.batch.id } })
               }
             >
-              <View style={styles.batchIconWrap}>
-                <Ionicons name="book" size={18} color={theme.navy} />
+              {e.batch?.thumbnail_url ? (
+                <Image source={{ uri: e.batch.thumbnail_url }} style={styles.batchCover} resizeMode="cover" />
+              ) : (
+                <View style={[styles.batchCover, styles.batchCoverPlaceholder]}>
+                  <Ionicons name="book" size={18} color={theme.navy} />
+                </View>
+              )}
+              <View style={{ flex: 1 }}>
+                {e.batch?.exam_category ? (
+                  <Text style={styles.batchCategory}>{e.batch.exam_category}</Text>
+                ) : null}
+                <Text style={styles.batchName}>{e.batch?.title ?? "Batch"}</Text>
+                {e.batch?.fees_inr != null ? (
+                  <Text style={styles.batchPrice}>{formatInr(e.batch.fees_inr)}</Text>
+                ) : null}
               </View>
-              <Text style={styles.batchName}>{e.batch?.title ?? e.batch?.name ?? "Batch"}</Text>
               <Ionicons name="chevron-forward" size={18} color={theme.textMuted} />
             </TouchableOpacity>
           ))
@@ -106,7 +139,7 @@ const styles = StyleSheet.create({
   heroCard: {
     backgroundColor: theme.navy,
     paddingTop: 26,
-    paddingBottom: 28,
+    paddingBottom: 20,
     paddingHorizontal: 20,
     borderBottomLeftRadius: 24,
     borderBottomRightRadius: 24,
@@ -138,7 +171,7 @@ const styles = StyleSheet.create({
   batchCard: {
     backgroundColor: "#fff",
     borderRadius: 14,
-    padding: 14,
+    padding: 10,
     marginBottom: 10,
     borderWidth: 1,
     borderColor: theme.border,
@@ -146,13 +179,9 @@ const styles = StyleSheet.create({
     alignItems: "center",
     gap: 12,
   },
-  batchIconWrap: {
-    width: 36,
-    height: 36,
-    borderRadius: 10,
-    backgroundColor: "#eef1fb",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  batchName: { fontSize: 14, fontWeight: "600", color: theme.textPrimary, flex: 1 },
+  batchCover: { width: 52, height: 52, borderRadius: 10 },
+  batchCoverPlaceholder: { backgroundColor: "#eef1fb", alignItems: "center", justifyContent: "center" },
+  batchCategory: { fontSize: 9, fontWeight: "700", color: theme.navy, textTransform: "uppercase" },
+  batchName: { fontSize: 14, fontWeight: "600", color: theme.textPrimary, marginTop: 2 },
+  batchPrice: { fontSize: 13, fontWeight: "700", color: theme.navy, marginTop: 3 },
 });

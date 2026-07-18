@@ -1,13 +1,29 @@
 import { useCallback, useState } from "react";
-import { View, Text, FlatList, StyleSheet, ActivityIndicator } from "react-native";
+import { View, Text, FlatList, StyleSheet, ActivityIndicator, TouchableOpacity, Linking } from "react-native";
 import { useFocusEffect } from "expo-router";
 import { supabase } from "@/lib/supabase";
+import { theme } from "@/lib/theme";
 
+// Matches the real `notifications` table schema used by the website's admin
+// panel (src/routes/_authenticated/admin.notifications.tsx): title,
+// category, exam_date, link_url, body, is_active — NOT "message".
 type Notice = {
   id: string;
-  title?: string | null;
-  message?: string | null;
+  title: string;
+  category?: string | null;
+  exam_date?: string | null;
+  link_url?: string | null;
+  body?: string | null;
   created_at: string;
+};
+
+const CATEGORY_LABELS: Record<string, string> = {
+  vacancy: "Vacancy",
+  admit_card: "Admit Card",
+  answer_key: "Answer Key",
+  result: "Result",
+  exam_date: "Exam Date",
+  notification: "Notification",
 };
 
 export default function NotificationsScreen() {
@@ -39,7 +55,7 @@ export default function NotificationsScreen() {
   if (loading) {
     return (
       <View style={styles.center}>
-        <ActivityIndicator color="#17358a" />
+        <ActivityIndicator color={theme.navy} />
       </View>
     );
   }
@@ -57,9 +73,25 @@ export default function NotificationsScreen() {
       }
       renderItem={({ item }) => (
         <View style={styles.card}>
+          {item.category ? (
+            <View style={styles.categoryPill}>
+              <Text style={styles.categoryText}>
+                {CATEGORY_LABELS[item.category] ?? item.category}
+              </Text>
+            </View>
+          ) : null}
           <Text style={styles.title}>{item.title}</Text>
-          {item.message ? <Text style={styles.message}>{item.message}</Text> : null}
-          <Text style={styles.date}>{new Date(item.created_at).toLocaleDateString("en-IN")}</Text>
+          {item.body ? <Text style={styles.message}>{item.body}</Text> : null}
+          <View style={styles.footerRow}>
+            <Text style={styles.date}>
+              {new Date(item.exam_date ?? item.created_at).toLocaleDateString("en-IN")}
+            </Text>
+            {item.link_url ? (
+              <TouchableOpacity onPress={() => Linking.openURL(item.link_url!)}>
+                <Text style={styles.link}>Open link →</Text>
+              </TouchableOpacity>
+            ) : null}
+          </View>
         </View>
       )}
     />
@@ -67,19 +99,30 @@ export default function NotificationsScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: "#f7f8fc" },
-  center: { flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: "#f7f8fc" },
+  container: { flex: 1, backgroundColor: theme.cream },
+  center: { flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: theme.cream },
   card: {
     backgroundColor: "#fff",
     borderRadius: 14,
     padding: 16,
     marginBottom: 10,
     borderWidth: 1,
-    borderColor: "#e6e9f5",
+    borderColor: theme.border,
   },
-  title: { fontSize: 15, fontWeight: "600", color: "#12183a" },
+  categoryPill: {
+    alignSelf: "flex-start",
+    backgroundColor: "#f4e9c9",
+    borderRadius: 8,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    marginBottom: 8,
+  },
+  categoryText: { fontSize: 10, color: theme.navy, fontWeight: "700" },
+  title: { fontSize: 15, fontWeight: "600", color: theme.textPrimary },
   message: { fontSize: 13, color: "#57534e", marginTop: 4 },
-  date: { fontSize: 11, color: "#9ba0bd", marginTop: 8 },
+  footerRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginTop: 10 },
+  date: { fontSize: 11, color: theme.textMuted },
+  link: { fontSize: 12, color: theme.navy, fontWeight: "700" },
   emptyCard: { alignItems: "center", padding: 30 },
-  emptyText: { color: "#9ba0bd", fontSize: 13 },
+  emptyText: { color: theme.textMuted, fontSize: 13 },
 });

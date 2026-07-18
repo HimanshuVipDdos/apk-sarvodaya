@@ -1,12 +1,26 @@
 import { useCallback, useState } from "react";
-import { View, Text, StyleSheet, ScrollView, ActivityIndicator, TouchableOpacity, Linking } from "react-native";
+import { View, Text, StyleSheet, ScrollView, ActivityIndicator, TouchableOpacity, Linking, Image } from "react-native";
 import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
 import { supabase } from "@/lib/supabase";
+import { theme } from "@/lib/theme";
 
 type LiveClass = { id: string; title: string; is_live: boolean; scheduled_at: string; youtube_url: string | null };
 type Lecture = { id: string; title: string; lecture_number: number | null };
 type CbtTest = { id: string; title: string; duration_minutes: number | null };
 type Material = { id: string; title: string; file_url: string | null; material_type: string | null };
+type BatchInfo = {
+  title: string;
+  thumbnail_url: string | null;
+  fees_inr: number | null;
+  original_fees_inr: number | null;
+  exam_category: string | null;
+  duration: string | null;
+};
+
+function formatInr(n?: number | null) {
+  if (n == null) return null;
+  return `₹${n.toLocaleString("en-IN")}`;
+}
 
 const TABS = ["Live", "Lectures", "Tests", "Notes"] as const;
 type Tab = (typeof TABS)[number];
@@ -16,7 +30,7 @@ export default function BatchDetailScreen() {
   const router = useRouter();
   const [tab, setTab] = useState<Tab>("Live");
   const [loading, setLoading] = useState(true);
-  const [batchTitle, setBatchTitle] = useState("");
+  const [batchInfo, setBatchInfo] = useState<BatchInfo | null>(null);
   const [liveClasses, setLiveClasses] = useState<LiveClass[]>([]);
   const [lectures, setLectures] = useState<Lecture[]>([]);
   const [tests, setTests] = useState<CbtTest[]>([]);
@@ -30,7 +44,7 @@ export default function BatchDetailScreen() {
         await supabase.rpc("tick_live_classes").catch(() => {});
 
         const [batchRes, liveRes, lecRes, testRes, matRes] = await Promise.all([
-          supabase.from("batches").select("title,name").eq("id", batchId).maybeSingle(),
+          supabase.from("batches").select("title, thumbnail_url, fees_inr, original_fees_inr, exam_category, duration").eq("id", batchId).maybeSingle(),
           supabase.from("live_classes").select("id,title,is_live,scheduled_at,youtube_url").eq("batch_id", batchId).order("scheduled_at", { ascending: false }),
           supabase.from("lectures").select("id,title,lecture_number").eq("batch_id", batchId).eq("is_published", true).order("lecture_number", { ascending: true }),
           supabase.from("cbt_tests").select("id,title,duration_minutes").eq("batch_id", batchId).eq("is_published", true),
@@ -38,7 +52,7 @@ export default function BatchDetailScreen() {
         ]);
 
         if (!cancelled) {
-          setBatchTitle((batchRes.data as any)?.title ?? (batchRes.data as any)?.name ?? "Batch");
+          setBatchInfo((batchRes.data as any) ?? null);
           setLiveClasses((liveRes.data as any) ?? []);
           setLectures((lecRes.data as any) ?? []);
           setTests((testRes.data as any) ?? []);
@@ -63,9 +77,32 @@ export default function BatchDetailScreen() {
   return (
     <View style={styles.container}>
       <View style={styles.header}>
-        <Text style={styles.batchTitle} numberOfLines={1}>
-          {batchTitle}
-        </Text>
+        {batchInfo?.thumbnail_url ? (
+          <Image
+            source={{ uri: batchInfo.thumbnail_url }}
+            style={[StyleSheet.absoluteFillObject, { opacity: 0.35 }]}
+            resizeMode="cover"
+          />
+        ) : null}
+        <View style={styles.headerContent}>
+          {batchInfo?.exam_category ? (
+            <Text style={styles.headerCategory}>{batchInfo.exam_category}</Text>
+          ) : null}
+          <Text style={styles.batchTitle} numberOfLines={2}>
+            {batchInfo?.title ?? "Batch"}
+          </Text>
+          <View style={styles.headerFooterRow}>
+            {batchInfo?.duration ? <Text style={styles.headerDuration}>{batchInfo.duration}</Text> : null}
+            {batchInfo?.fees_inr != null ? (
+              <View style={{ flexDirection: "row", alignItems: "baseline", gap: 6 }}>
+                <Text style={styles.headerPrice}>{formatInr(batchInfo.fees_inr)}</Text>
+                {batchInfo.original_fees_inr && batchInfo.original_fees_inr > batchInfo.fees_inr ? (
+                  <Text style={styles.headerOriginalPrice}>{formatInr(batchInfo.original_fees_inr)}</Text>
+                ) : null}
+              </View>
+            ) : null}
+          </View>
+        </View>
       </View>
 
       <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.tabBar}>
@@ -166,8 +203,14 @@ function Empty({ text }: { text: string }) {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: "#f7f8fc" },
   center: { flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: "#f7f8fc" },
-  header: { paddingTop: 50, paddingHorizontal: 18, paddingBottom: 18, backgroundColor: "#17358a" },
-  batchTitle: { fontSize: 18, fontWeight: "700", color: "#fff" },
+  header: { backgroundColor: "#17358a", position: "relative", overflow: "hidden" },
+  headerContent: { paddingTop: 50, paddingHorizontal: 18, paddingBottom: 16 },
+  headerCategory: { fontSize: 10, fontWeight: "700", color: "#d4af37", textTransform: "uppercase", letterSpacing: 0.6 },
+  batchTitle: { fontSize: 18, fontWeight: "700", color: "#fff", marginTop: 3 },
+  headerFooterRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "flex-end", marginTop: 10 },
+  headerDuration: { fontSize: 11, color: "#c8d0ee" },
+  headerPrice: { fontSize: 17, fontWeight: "700", color: "#fff" },
+  headerOriginalPrice: { fontSize: 12, color: "#c8d0ee", textDecorationLine: "line-through" },
   tabBar: { backgroundColor: "#fff", borderBottomWidth: 1, borderBottomColor: "#e6e9f5", flexGrow: 0, paddingVertical: 8, paddingHorizontal: 10 },
   tab: { paddingHorizontal: 16, paddingVertical: 8, marginHorizontal: 4, borderRadius: 18 },
   tabActive: { backgroundColor: "#17358a" },

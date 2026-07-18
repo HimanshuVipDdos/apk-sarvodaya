@@ -38,6 +38,25 @@ the website (same accounts, same session).
 
 ---
 
+## 5. Admin Tools (new — visible only to admin accounts)
+
+If your account has the `admin` role (same `has_role` check as the
+website), a new "Admin Tools" button appears on the Profile tab. From
+there you can:
+- Manage the **homepage slider** (same `hero_slides` table + `hero-slides`
+  storage bucket as the website — add/reorder/hide/delete slides, upload
+  photo directly from your phone).
+- Post **Notices** (vacancy/admit-card/result etc — same `notifications`
+  table as the website).
+
+Anything added here shows on the website too, and vice versa — same
+database. Deep content tools (question bank, bulk CBT uploader, AI
+question parser, enrollments, gallery, faculty, results) stay on the
+website admin panel for now; they're bigger tools better suited to a
+larger screen, but can be added to the app later if useful.
+
+---
+
 ## Deployment — 2 Edge Functions + 3 webhooks (15 min total, one-time)
 
 ### A. `cbt-mobile-api` (powers Tests/Result/Mistakes/Leaderboard)

@@ -9,7 +9,7 @@ type CbtTest = {
   id: string;
   title: string;
   duration_minutes?: number | null;
-  total_marks?: number | null;
+  marks_per_question?: number | null;
 };
 
 export default function TestsScreen() {
@@ -24,8 +24,8 @@ export default function TestsScreen() {
         setLoading(true);
         const { data, error } = await supabase
           .from("cbt_tests")
-          .select("id, title, duration_minutes, total_marks")
-          .eq("is_active", true)
+          .select("id, title, duration_minutes, marks_per_question")
+          .eq("is_published", true)
           .order("created_at", { ascending: false });
         if (!cancelled) {
           if (error) console.warn(error.message);
@@ -77,10 +77,10 @@ export default function TestsScreen() {
                   <Text style={styles.meta}>{item.duration_minutes} min</Text>
                 </View>
               ) : null}
-              {item.total_marks ? (
+              {item.marks_per_question ? (
                 <View style={styles.metaItem}>
                   <Ionicons name="bar-chart-outline" size={12} color={theme.textSecondary} />
-                  <Text style={styles.meta}>{item.total_marks} marks</Text>
+                  <Text style={styles.meta}>{item.marks_per_question} marks/question</Text>
                 </View>
               ) : null}
             </View>

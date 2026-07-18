@@ -12,14 +12,17 @@ function RootNavigation() {
   useEffect(() => {
     if (loading) return;
 
-    const inTabsGroup = segments[0] === "(tabs)";
     const onLoginScreen = segments[0] === "login";
+    const onIndexScreen = segments.length === 0;
 
     if (!session && !onLoginScreen) {
       // Not logged in and not already on login -> send to login
       router.replace("/login");
-    } else if (session && !inTabsGroup) {
-      // Logged in but sitting on index/login -> send to dashboard
+    } else if (session && (onLoginScreen || onIndexScreen)) {
+      // Logged in but sitting on index/login -> send to dashboard.
+      // (Only redirect from login/index — NOT from every screen outside
+      // (tabs), otherwise opening a batch/live-class/test bounces straight
+      // back to the dashboard.)
       router.replace("/(tabs)/dashboard");
     }
   }, [session, loading, segments]);

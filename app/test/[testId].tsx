@@ -33,6 +33,13 @@ export default function TestTakingScreen() {
   const [secondsLeft, setSecondsLeft] = useState<number | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const deadlineRef = useRef<number | null>(null);
+  // Mirrors `answers` so the timer's auto-submit (fired from inside a
+  // setInterval closure) always reads the LATEST answers, not the empty
+  // object captured when the interval was first created.
+  const answersRef = useRef(answers);
+  useEffect(() => {
+    answersRef.current = answers;
+  }, [answers]);
 
   // Load / resume the attempt
   useEffect(() => {
@@ -106,9 +113,10 @@ export default function TestTakingScreen() {
     }
 
     setSubmitting(true);
+    const latestAnswers = answersRef.current;
     const payload: SubmitAnswer[] = questions.map((q) => ({
       question_id: q.id,
-      selected_option: answers[q.id] ?? null,
+      selected_option: latestAnswers[q.id] ?? null,
     }));
 
     try {
