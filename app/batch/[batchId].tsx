@@ -134,7 +134,11 @@ export default function BatchDetailScreen() {
   useFocusEffect(
     useCallback(() => {
       // Best-effort, fire-and-forget — never blocks anything on this page.
-      supabase.rpc("tick_live_classes").catch(() => {});
+      try {
+        supabase.rpc("tick_live_classes").catch(() => {});
+      } catch {
+        // ignore — this call must never crash the screen
+      }
 
       loadHeader();
       loadLive();
