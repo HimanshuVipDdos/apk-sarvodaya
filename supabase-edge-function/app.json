@@ -1,0 +1,55 @@
+{
+  "expo": {
+    "name": "Sarvodaya Adhyeta",
+    "slug": "sarvodaya-adhyeta",
+    "owner": "extremeogs-team",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "scheme": "sarvodayaadhyeta",
+    "userInterfaceStyle": "automatic",
+    "splash": {
+      "image": "./assets/splash.png",
+      "resizeMode": "cover",
+      "backgroundColor": "#17358a"
+    },
+    "android": {
+      "package": "com.sarvodayaadhyeta.app",
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#17358a"
+      },
+      "permissions": ["NOTIFICATIONS"]
+    },
+    "ios": {
+      "bundleIdentifier": "com.sarvodayaadhyeta.app",
+      "supportsTablet": false
+    },
+    "plugins": [
+      "expo-router",
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/notification-icon.png",
+          "color": "#17358a"
+        }
+      ],
+      [
+        "expo-build-properties",
+        {
+          "android": {
+            "kotlinVersion": "1.9.25"
+          }
+        }
+      ]
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "c9a9638f-f033-400e-9b2d-08f0174b533b"
+      },
+      "router": {
+        "origin": false
+      }
+    }
+  }
+}
