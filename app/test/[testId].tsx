@@ -8,16 +8,22 @@ import {
   ActivityIndicator,
   Alert,
   BackHandler,
+  Animated,
+  Easing,
 } from "react-native";
 import { useLocalSearchParams, useRouter } from "expo-router";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import {
   startCbtAttempt,
   submitCbtAttempt,
   type CbtQuestion,
   type SubmitAnswer,
 } from "@/lib/cbt-api";
+import { theme } from "@/lib/theme";
+import { FillBar, PressScale } from "@/components/Motion";
 
 const OPTION_KEYS = ["a", "b", "c", "d"] as const;
+const PALETTE_ITEM_SPAN = 44; // item width (36) + horizontal margin (4+4)
 
 // Ticks every second entirely on its own — the parent screen (question text,
 // options, the palette of every question number) never re-renders because of
@@ -33,6 +39,8 @@ const TimerPill = memo(function TimerPill({
 }) {
   const [secondsLeft, setSecondsLeft] = useState(() => Math.max(0, Math.round((deadline - Date.now()) / 1000)));
   const expiredRef = useRef(false);
+  const urgent = secondsLeft < 60;
+  const pulse = useRef(new Animated.Value(1)).current;
 
   useEffect(() => {
     expiredRef.current = false;
@@ -48,15 +56,32 @@ const TimerPill = memo(function TimerPill({
     return () => clearInterval(interval);
   }, [deadline, onExpire]);
 
+  // Gentle urgency pulse in the last minute only — purely visual, never
+  // touches the actual countdown logic above.
+  useEffect(() => {
+    if (!urgent) {
+      pulse.setValue(1);
+      return;
+    }
+    const loop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(pulse, { toValue: 1.08, duration: 450, easing: Easing.inOut(Easing.ease), useNativeDriver: true }),
+        Animated.timing(pulse, { toValue: 1, duration: 450, easing: Easing.inOut(Easing.ease), useNativeDriver: true }),
+      ])
+    );
+    loop.start();
+    return () => loop.stop();
+  }, [urgent, pulse]);
+
   const mins = Math.floor(secondsLeft / 60);
   const secs = secondsLeft % 60;
 
   return (
-    <View style={[styles.timerPill, secondsLeft < 60 && styles.timerPillUrgent]}>
+    <Animated.View style={[styles.timerPill, urgent && styles.timerPillUrgent, { transform: [{ scale: pulse }] }]}>
       <Text style={styles.timerText}>
         ⏱ {String(mins).padStart(2, "0")}:{String(secs).padStart(2, "0")}
       </Text>
-    </View>
+    </Animated.View>
   );
 });
 
@@ -87,6 +112,7 @@ const PaletteItem = memo(function PaletteItem({
 export default function TestTakingScreen() {
   const { testId } = useLocalSearchParams<{ testId: string }>();
   const router = useRouter();
+  const insets = useSafeAreaInsets();
 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -109,6 +135,11 @@ export default function TestTakingScreen() {
   // get torn down and recreated for no reason.
   const handleSubmitRef = useRef<(auto?: boolean) => void>(() => {});
   const onTimerExpire = useRef(() => handleSubmitRef.current(true)).current;
+
+  // Question transition fade — purely cosmetic, resets on every `current` change.
+  const questionFade = useRef(new Animated.Value(0)).current;
+  const questionArea = useRef<ScrollView>(null);
+  const paletteScroll = useRef<ScrollView>(null);
 
   // Load / resume the attempt
   useEffect(() => {
@@ -155,6 +186,24 @@ export default function TestTakingScreen() {
     return () => sub.remove();
   }, []);
 
+  // Every time the visible question changes: scroll the question area back
+  // to the top (previously it kept whatever scroll offset the last question
+  // was left at — a long question could leave the next one starting
+  // mid-scroll), nudge the palette so `current` stays in view on long
+  // tests, and play a small fade-in for the new question.
+  useEffect(() => {
+    questionArea.current?.scrollTo({ y: 0, animated: false });
+    const targetX = Math.max(0, current * PALETTE_ITEM_SPAN - 140);
+    paletteScroll.current?.scrollTo({ x: targetX, animated: true });
+    questionFade.setValue(0);
+    Animated.timing(questionFade, {
+      toValue: 1,
+      duration: 220,
+      easing: Easing.out(Easing.cubic),
+      useNativeDriver: true,
+    }).start();
+  }, [current]);
+
   async function handleSubmit(auto = false) {
     if (!attemptId || submitting) return;
     if (!auto) {
@@ -192,7 +241,7 @@ export default function TestTakingScreen() {
   if (loading) {
     return (
       <View style={styles.center}>
-        <ActivityIndicator color="#17358a" />
+        <ActivityIndicator color={theme.navy} />
       </View>
     );
   }
@@ -214,41 +263,44 @@ export default function TestTakingScreen() {
 
   return (
     <View style={styles.container}>
-      <View style={styles.header}>
+      <View style={[styles.header, { paddingTop: insets.top + 10 }]}>
         <Text style={styles.testTitle} numberOfLines={1}>
           {testTitle}
         </Text>
         {deadline != null && <TimerPill deadline={deadline} onExpire={onTimerExpire} />}
       </View>
 
-      <ScrollView style={styles.questionArea} contentContainerStyle={{ padding: 20 }}>
-        <Text style={styles.qCounter}>
-          Question {current + 1} of {questions.length}
-        </Text>
-        <Text style={styles.qText}>{q.question_text}</Text>
+      <ScrollView ref={questionArea} style={styles.questionArea} contentContainerStyle={{ padding: 20 }}>
+        <Animated.View style={{ opacity: questionFade }}>
+          <Text style={styles.qCounter}>
+            Question {current + 1} of {questions.length}
+          </Text>
+          <Text style={styles.qText}>{q.question_text}</Text>
 
-        {OPTION_KEYS.map((key) => {
-          const optionText = q[`option_${key}` as keyof CbtQuestion] as string;
-          const selected = answers[q.id] === key;
-          return (
-            <TouchableOpacity
-              key={key}
-              style={[styles.option, selected && styles.optionSelected]}
-              onPress={() => setAnswers((prev) => ({ ...prev, [q.id]: key }))}
-            >
-              <View style={[styles.optionBullet, selected && styles.optionBulletSelected]}>
-                <Text style={[styles.optionBulletText, selected && styles.optionBulletTextSelected]}>
-                  {key.toUpperCase()}
-                </Text>
-              </View>
-              <Text style={styles.optionText}>{optionText}</Text>
-            </TouchableOpacity>
-          );
-        })}
+          {OPTION_KEYS.map((key) => {
+            const optionText = q[`option_${key}` as keyof CbtQuestion] as string;
+            const selected = answers[q.id] === key;
+            return (
+              <TouchableOpacity
+                key={key}
+                style={[styles.option, selected && styles.optionSelected]}
+                onPress={() => setAnswers((prev) => ({ ...prev, [q.id]: key }))}
+                activeOpacity={0.75}
+              >
+                <View style={[styles.optionBullet, selected && styles.optionBulletSelected]}>
+                  <Text style={[styles.optionBulletText, selected && styles.optionBulletTextSelected]}>
+                    {key.toUpperCase()}
+                  </Text>
+                </View>
+                <Text style={styles.optionText}>{optionText}</Text>
+              </TouchableOpacity>
+            );
+          })}
+        </Animated.View>
       </ScrollView>
 
       {/* Question palette */}
-      <ScrollView horizontal style={styles.palette} showsHorizontalScrollIndicator={false}>
+      <ScrollView ref={paletteScroll} horizontal style={styles.palette} showsHorizontalScrollIndicator={false}>
         {questions.map((qq, i) => (
           <PaletteItem
             key={qq.id}
@@ -260,10 +312,17 @@ export default function TestTakingScreen() {
         ))}
       </ScrollView>
 
-      <View style={styles.footer}>
-        <Text style={styles.progressText}>
-          {answeredCount}/{questions.length} answered
-        </Text>
+      <View style={[styles.footer, { paddingBottom: insets.bottom + 14 }]}>
+        <View style={styles.progressRow}>
+          <Text style={styles.progressText}>
+            {answeredCount}/{questions.length} answered
+          </Text>
+          <FillBar
+            percent={questions.length ? (answeredCount / questions.length) * 100 : 0}
+            color={theme.gold}
+            height={5}
+          />
+        </View>
         <View style={styles.navButtons}>
           <TouchableOpacity
             style={[styles.navButton, current === 0 && styles.navButtonDisabled]}
@@ -274,24 +333,17 @@ export default function TestTakingScreen() {
           </TouchableOpacity>
 
           {current < questions.length - 1 ? (
-            <TouchableOpacity
-              style={styles.navButtonPrimary}
-              onPress={() => setCurrent((c) => Math.min(questions.length - 1, c + 1))}
-            >
+            <PressScale style={styles.navButtonPrimary} onPress={() => setCurrent((c) => Math.min(questions.length - 1, c + 1))}>
               <Text style={styles.navButtonPrimaryText}>Next</Text>
-            </TouchableOpacity>
+            </PressScale>
           ) : (
-            <TouchableOpacity
-              style={styles.submitButton}
-              disabled={submitting}
-              onPress={() => handleSubmit(false)}
-            >
+            <PressScale style={styles.submitButton} disabled={submitting} onPress={() => handleSubmit(false)}>
               {submitting ? (
                 <ActivityIndicator color="#fff" size="small" />
               ) : (
                 <Text style={styles.navButtonPrimaryText}>Submit Test</Text>
               )}
-            </TouchableOpacity>
+            </PressScale>
           )}
         </View>
       </View>
@@ -300,59 +352,58 @@ export default function TestTakingScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: "#f7f8fc" },
-  center: { flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: "#f7f8fc", padding: 24 },
-  errorTitle: { fontSize: 18, fontWeight: "700", color: "#dc2626" },
-  errorMsg: { fontSize: 13, color: "#5b6280", marginTop: 8, textAlign: "center" },
+  container: { flex: 1, backgroundColor: theme.cream },
+  center: { flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: theme.cream, padding: 24 },
+  errorTitle: { fontSize: 18, fontWeight: "700", color: theme.dangerText },
+  errorMsg: { fontSize: 13, color: theme.textSecondary, marginTop: 8, textAlign: "center" },
   backLink: { marginTop: 20 },
-  backLinkText: { color: "#17358a", fontWeight: "600" },
+  backLinkText: { color: theme.navy, fontWeight: "600" },
   header: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
     paddingHorizontal: 16,
-    paddingTop: 50,
     paddingBottom: 12,
     backgroundColor: "#fff",
     borderBottomWidth: 1,
-    borderBottomColor: "#e6e9f5",
+    borderBottomColor: theme.border,
   },
-  testTitle: { fontSize: 15, fontWeight: "700", color: "#12183a", flex: 1, marginRight: 10 },
+  testTitle: { fontSize: 15, fontWeight: "700", color: theme.textPrimary, flex: 1, marginRight: 10 },
   timerPill: { backgroundColor: "#f4e9c9", borderRadius: 10, paddingHorizontal: 10, paddingVertical: 6 },
-  timerPillUrgent: { backgroundColor: "#fee2e2" },
-  timerText: { fontWeight: "700", color: "#17358a", fontSize: 13 },
+  timerPillUrgent: { backgroundColor: theme.danger },
+  timerText: { fontWeight: "700", color: theme.navy, fontSize: 13 },
   questionArea: { flex: 1 },
-  qCounter: { fontSize: 12, color: "#9ba0bd", marginBottom: 8 },
-  qText: { fontSize: 16, fontWeight: "600", color: "#12183a", marginBottom: 20, lineHeight: 22 },
+  qCounter: { fontSize: 12, color: theme.textMuted, marginBottom: 8 },
+  qText: { fontSize: 16, fontWeight: "600", color: theme.textPrimary, marginBottom: 20, lineHeight: 22 },
   option: {
     flexDirection: "row",
     alignItems: "center",
     borderWidth: 1,
-    borderColor: "#e6e9f5",
+    borderColor: theme.border,
     borderRadius: 14,
     padding: 14,
     marginBottom: 10,
     backgroundColor: "#fff",
   },
-  optionSelected: { borderColor: "#17358a", backgroundColor: "#f4e9c9" },
+  optionSelected: { borderColor: theme.navy, backgroundColor: "#f4e9c9" },
   optionBullet: {
     width: 26,
     height: 26,
     borderRadius: 13,
     borderWidth: 1,
-    borderColor: "#d6d3d1",
+    borderColor: theme.border,
     alignItems: "center",
     justifyContent: "center",
     marginRight: 12,
   },
-  optionBulletSelected: { backgroundColor: "#17358a", borderColor: "#17358a" },
-  optionBulletText: { fontSize: 12, fontWeight: "700", color: "#5b6280" },
+  optionBulletSelected: { backgroundColor: theme.navy, borderColor: theme.navy },
+  optionBulletText: { fontSize: 12, fontWeight: "700", color: theme.textSecondary },
   optionBulletTextSelected: { color: "#fff" },
-  optionText: { flex: 1, fontSize: 14, color: "#12183a" },
+  optionText: { flex: 1, fontSize: 14, color: theme.textPrimary },
   palette: {
     maxHeight: 56,
     borderTopWidth: 1,
-    borderTopColor: "#e6e9f5",
+    borderTopColor: theme.border,
     backgroundColor: "#fff",
   },
   paletteItem: {
@@ -360,37 +411,38 @@ const styles = StyleSheet.create({
     height: 36,
     borderRadius: 8,
     borderWidth: 1,
-    borderColor: "#e6e9f5",
+    borderColor: theme.border,
     alignItems: "center",
     justifyContent: "center",
     marginHorizontal: 4,
     marginVertical: 10,
   },
-  paletteItemAnswered: { backgroundColor: "#dcfce7", borderColor: "#86efac" },
-  paletteItemCurrent: { borderColor: "#17358a", borderWidth: 2 },
-  paletteItemText: { fontSize: 12, color: "#5b6280" },
-  paletteItemTextActive: { color: "#12183a", fontWeight: "700" },
+  paletteItemAnswered: { backgroundColor: theme.success, borderColor: theme.successBorder },
+  paletteItemCurrent: { borderColor: theme.navy, borderWidth: 2 },
+  paletteItemText: { fontSize: 12, color: theme.textSecondary },
+  paletteItemTextActive: { color: theme.textPrimary, fontWeight: "700" },
   footer: {
     padding: 14,
     backgroundColor: "#fff",
     borderTopWidth: 1,
-    borderTopColor: "#e6e9f5",
+    borderTopColor: theme.border,
   },
-  progressText: { fontSize: 11, color: "#9ba0bd", marginBottom: 8, textAlign: "center" },
+  progressRow: { marginBottom: 10, gap: 6 },
+  progressText: { fontSize: 11, color: theme.textMuted, textAlign: "center" },
   navButtons: { flexDirection: "row", gap: 10 },
   navButton: {
     flex: 1,
     borderWidth: 1,
-    borderColor: "#e6e9f5",
+    borderColor: theme.border,
     borderRadius: 12,
     paddingVertical: 13,
     alignItems: "center",
   },
   navButtonDisabled: { opacity: 0.4 },
-  navButtonText: { color: "#57534e", fontWeight: "600" },
+  navButtonText: { color: theme.textSecondary, fontWeight: "600" },
   navButtonPrimary: {
     flex: 1,
-    backgroundColor: "#17358a",
+    backgroundColor: theme.navy,
     borderRadius: 12,
     paddingVertical: 13,
     alignItems: "center",
