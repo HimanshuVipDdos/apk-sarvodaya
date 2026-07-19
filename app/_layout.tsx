@@ -1,13 +1,30 @@
 import { useEffect } from "react";
 import { Stack, useRouter, useSegments } from "expo-router";
 import { StatusBar } from "expo-status-bar";
+import * as ScreenCapture from "expo-screen-capture";
 import { AuthProvider, useAuth } from "@/lib/auth-context";
 import { registerForPushNotificationsAsync } from "@/lib/notifications";
+import { ErrorBoundary } from "@/components/ErrorBoundary";
 
 function RootNavigation() {
   const { session, loading } = useAuth();
   const segments = useSegments();
   const router = useRouter();
+
+  // App-wide screenshot/screen-recording block. On Android this fully blocks
+  // both (system shows a black frame). On iOS, Apple does not let apps block
+  // screenshots — only screen recording of protected content can be flagged —
+  // so this is best-effort there.
+  // Wrapped defensively: if this native module isn't part of the currently
+  // installed build yet (it was just added — needs a fresh `eas build`, a
+  // plain JS/Metro reload is NOT enough), this must never crash the app.
+  useEffect(() => {
+    try {
+      ScreenCapture.preventScreenCaptureAsync().catch(() => {});
+    } catch {
+      // native module not available in this build yet — ignore
+    }
+  }, []);
 
   useEffect(() => {
     if (loading) return;
@@ -45,8 +62,10 @@ function RootNavigation() {
 
 export default function RootLayout() {
   return (
-    <AuthProvider>
-      <RootNavigation />
-    </AuthProvider>
+    <ErrorBoundary>
+      <AuthProvider>
+        <RootNavigation />
+      </AuthProvider>
+    </ErrorBoundary>
   );
 }

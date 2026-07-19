@@ -1,5 +1,5 @@
 import { Tabs } from "expo-router";
-import { Image } from "react-native";
+import { Image, Text, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { theme } from "@/lib/theme";
 
@@ -21,11 +21,16 @@ export default function TabsLayout() {
         options={{
           title: "Dashboard",
           headerTitle: () => (
-            <Image
-              source={require("@/assets/icon.png")}
-              style={{ width: 30, height: 30, borderRadius: 15, marginRight: 4 }}
-              resizeMode="contain"
-            />
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+              <Image
+                source={require("@/assets/icon.png")}
+                style={{ width: 30, height: 30, borderRadius: 15 }}
+                resizeMode="contain"
+              />
+              <Text style={{ color: theme.goldLight, fontSize: 12, fontWeight: "700", letterSpacing: 0.2 }}>
+                सर्वोदय है तो उदय है
+              </Text>
+            </View>
           ),
           headerTitleAlign: "left",
           tabBarIcon: ({ focused, color }) => (
