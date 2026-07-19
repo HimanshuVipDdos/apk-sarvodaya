@@ -10,28 +10,25 @@ import {
   KeyboardAvoidingView,
   Platform,
   Image,
-  ScrollView,
   Animated,
   Modal,
   Easing,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
+import { StatusBar } from "expo-status-bar";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { supabase } from "@/lib/supabase";
 import { signInWithGoogle } from "@/lib/google-auth";
 import { theme } from "@/lib/theme";
+import { RiseIn, PopIn, PressScale, useFloat } from "@/components/Motion";
 
-function useTapScale() {
-  const scale = useRef(new Animated.Value(1)).current;
-  const onPressIn = () =>
-    Animated.timing(scale, { toValue: 0.96, duration: 90, useNativeDriver: true, easing: Easing.out(Easing.quad) }).start();
-  const onPressOut = () =>
-    Animated.spring(scale, { toValue: 1, useNativeDriver: true, friction: 5, tension: 140 }).start();
-  return { scale, onPressIn, onPressOut };
-}
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 export default function LoginScreen() {
+  const insets = useSafeAreaInsets();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [googleLoading, setGoogleLoading] = useState(false);
 
@@ -40,34 +37,45 @@ export default function LoginScreen() {
   const [forgotEmail, setForgotEmail] = useState("");
   const [forgotSending, setForgotSending] = useState(false);
 
-  // Entrance animation
-  const fade = useRef(new Animated.Value(0)).current;
-  const slide = useRef(new Animated.Value(24)).current;
-
-  useEffect(() => {
-    Animated.parallel([
-      Animated.timing(fade, { toValue: 1, duration: 420, useNativeDriver: true, easing: Easing.out(Easing.cubic) }),
-      Animated.timing(slide, { toValue: 0, duration: 420, useNativeDriver: true, easing: Easing.out(Easing.cubic) }),
+  // Shake feedback on failed login (form card)
+  const shake = useRef(new Animated.Value(0)).current;
+  function playShake() {
+    shake.setValue(0);
+    Animated.sequence([
+      Animated.timing(shake, { toValue: 1, duration: 55, useNativeDriver: true }),
+      Animated.timing(shake, { toValue: -1, duration: 55, useNativeDriver: true }),
+      Animated.timing(shake, { toValue: 1, duration: 55, useNativeDriver: true }),
+      Animated.timing(shake, { toValue: 0, duration: 55, useNativeDriver: true }),
     ]).start();
-  }, [fade, slide]);
+  }
+  const shakeTranslate = shake.interpolate({ inputRange: [-1, 1], outputRange: [-8, 8] });
 
-  const googleTap = useTapScale();
-  const loginTap = useTapScale();
-  const forgotTap = useTapScale();
-  const sendResetTap = useTapScale();
+  // Decorative floating glow blobs behind the hero — purely cosmetic, cheap (2 native transforms)
+  const floatA = useFloat(14, 3400);
+  const floatB = useFloat(10, 2600);
 
   async function handleLogin() {
-    if (!email.trim() || !password) {
+    const trimmedEmail = email.trim();
+    if (!trimmedEmail || !password) {
       Alert.alert("Missing details", "Please enter both email and password.");
+      playShake();
+      return;
+    }
+    if (!EMAIL_RE.test(trimmedEmail)) {
+      Alert.alert("Invalid email", "Please enter a valid email address.");
+      playShake();
       return;
     }
     setLoading(true);
     const { error } = await supabase.auth.signInWithPassword({
-      email: email.trim(),
+      email: trimmedEmail,
       password,
     });
     setLoading(false);
-    if (error) Alert.alert("Login failed", error.message);
+    if (error) {
+      Alert.alert("Login failed", error.message);
+      playShake();
+    }
     // On success, the root layout's auth listener redirects automatically.
   }
 
@@ -96,6 +104,10 @@ export default function LoginScreen() {
       Alert.alert("Email required", "Please enter your registered email.");
       return;
     }
+    if (!EMAIL_RE.test(target)) {
+      Alert.alert("Invalid email", "Please enter a valid email address.");
+      return;
+    }
     setForgotSending(true);
     try {
       const { error } = await supabase.auth.resetPasswordForEmail(target, {
@@ -115,108 +127,142 @@ export default function LoginScreen() {
   }
 
   return (
-    <KeyboardAvoidingView
-      style={styles.container}
-      behavior={Platform.OS === "ios" ? "padding" : undefined}
-    >
-      <View style={styles.hero}>
-        <View style={styles.logoRing}>
-          <Image source={require("@/assets/icon.png")} style={styles.logo} resizeMode="cover" />
-        </View>
-        <Text style={styles.brand}>Sarvodaya Adhyeta</Text>
-        <Text style={styles.tagline}>A Dream Of Success</Text>
-      </View>
+    <View style={styles.container}>
+      {/* Hero has a dark navy background, so status bar content needs to be
+          light here — root layout defaults to "dark" for the rest of the app,
+          this local override only applies while this screen is mounted. */}
+      <StatusBar style="light" />
 
-      <Animated.ScrollView
-        contentContainerStyle={styles.formCard}
-        keyboardShouldPersistTaps="handled"
-        style={{ opacity: fade, transform: [{ translateY: slide }] }}
+      <KeyboardAvoidingView
+        style={{ flex: 1 }}
+        behavior={Platform.OS === "ios" ? "padding" : "height"}
+        keyboardVerticalOffset={Platform.OS === "ios" ? 0 : -80}
       >
-        <Text style={styles.subtitle}>Login to continue</Text>
+        <View style={[styles.hero, { paddingTop: insets.top + 28 }]}>
+          <Animated.View
+            style={[styles.blobA, { transform: [{ translateY: floatA }] }]}
+            pointerEvents="none"
+          />
+          <Animated.View
+            style={[styles.blobB, { transform: [{ translateY: floatB }] }]}
+            pointerEvents="none"
+          />
 
-        <Animated.View style={{ transform: [{ scale: googleTap.scale }] }}>
-          <TouchableOpacity
-            style={styles.googleButton}
-            onPress={handleGoogleLogin}
-            onPressIn={googleTap.onPressIn}
-            onPressOut={googleTap.onPressOut}
-            disabled={googleLoading || loading}
-            activeOpacity={1}
-          >
-            {googleLoading ? (
-              <ActivityIndicator color={theme.textPrimary} />
-            ) : (
-              <>
-                <Ionicons name="logo-google" size={18} color="#DB4437" />
-                <Text style={styles.googleButtonText}>Continue with Google</Text>
-              </>
-            )}
-          </TouchableOpacity>
-        </Animated.View>
-
-        <View style={styles.dividerRow}>
-          <View style={styles.dividerLine} />
-          <Text style={styles.dividerText}>or</Text>
-          <View style={styles.dividerLine} />
+          <PopIn>
+            <View style={styles.logoRing}>
+              <Image source={require("@/assets/icon.png")} style={styles.logo} resizeMode="cover" />
+            </View>
+          </PopIn>
+          <RiseIn delay={80}>
+            <Text style={styles.brand}>Sarvodaya Adhyeta</Text>
+          </RiseIn>
+          <RiseIn delay={140}>
+            <Text style={styles.tagline}>A Dream Of Success</Text>
+          </RiseIn>
         </View>
 
-        <Text style={styles.label}>Email</Text>
-        <TextInput
-          style={styles.input}
-          placeholder="you@example.com"
-          placeholderTextColor={theme.textMuted}
-          autoCapitalize="none"
-          keyboardType="email-address"
-          value={email}
-          onChangeText={setEmail}
-        />
+        <Animated.ScrollView
+          contentContainerStyle={[styles.formCard, { paddingBottom: insets.bottom + 24 }]}
+          keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator={false}
+          style={{ transform: [{ translateX: shakeTranslate }] }}
+        >
+          <RiseIn delay={100}>
+            <Text style={styles.subtitle}>Login to continue</Text>
+          </RiseIn>
 
-        <Text style={styles.label}>Password</Text>
-        <TextInput
-          style={styles.input}
-          placeholder="••••••••"
-          placeholderTextColor={theme.textMuted}
-          secureTextEntry
-          value={password}
-          onChangeText={setPassword}
-        />
+          <RiseIn delay={150}>
+            <PressScale onPress={handleGoogleLogin} disabled={googleLoading || loading} style={styles.googleButton}>
+              {googleLoading ? (
+                <ActivityIndicator color={theme.textPrimary} />
+              ) : (
+                <>
+                  <Ionicons name="logo-google" size={18} color="#DB4437" />
+                  <Text style={styles.googleButtonText}>Continue with Google</Text>
+                </>
+              )}
+            </PressScale>
+          </RiseIn>
 
-        <Animated.View style={{ alignSelf: "flex-end", transform: [{ scale: forgotTap.scale }] }}>
-          <TouchableOpacity
-            onPress={openForgotPassword}
-            onPressIn={forgotTap.onPressIn}
-            onPressOut={forgotTap.onPressOut}
-            activeOpacity={1}
-            style={{ paddingVertical: 4 }}
-          >
-            <Text style={styles.forgotText}>Forgot password?</Text>
-          </TouchableOpacity>
-        </Animated.View>
+          <RiseIn delay={190}>
+            <View style={styles.dividerRow}>
+              <View style={styles.dividerLine} />
+              <Text style={styles.dividerText}>or</Text>
+              <View style={styles.dividerLine} />
+            </View>
+          </RiseIn>
 
-        <Animated.View style={{ transform: [{ scale: loginTap.scale }] }}>
-          <TouchableOpacity
-            style={styles.button}
-            onPress={handleLogin}
-            onPressIn={loginTap.onPressIn}
-            onPressOut={loginTap.onPressOut}
-            disabled={loading || googleLoading}
-            activeOpacity={1}
-          >
-            {loading ? (
-              <ActivityIndicator color="#fff" />
-            ) : (
-              <Text style={styles.buttonText}>Login</Text>
-            )}
-          </TouchableOpacity>
-        </Animated.View>
+          <RiseIn delay={220}>
+            <Text style={styles.label}>Email</Text>
+            <TextInput
+              style={styles.input}
+              placeholder="you@example.com"
+              placeholderTextColor={theme.textMuted}
+              autoCapitalize="none"
+              autoCorrect={false}
+              keyboardType="email-address"
+              textContentType="emailAddress"
+              autoComplete="email"
+              value={email}
+              onChangeText={setEmail}
+              returnKeyType="next"
+            />
+          </RiseIn>
 
-        <Text style={styles.hint}>
-          Use the same email/password or Google account as your login on sarvodayadhyeta.online
-        </Text>
-      </Animated.ScrollView>
+          <RiseIn delay={260}>
+            <Text style={styles.label}>Password</Text>
+            <View style={styles.passwordRow}>
+              <TextInput
+                style={styles.passwordInput}
+                placeholder="••••••••"
+                placeholderTextColor={theme.textMuted}
+                secureTextEntry={!showPassword}
+                textContentType="password"
+                autoComplete="password"
+                value={password}
+                onChangeText={setPassword}
+                returnKeyType="done"
+                onSubmitEditing={handleLogin}
+              />
+              <TouchableOpacity
+                onPress={() => setShowPassword((v) => !v)}
+                hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                style={styles.eyeButton}
+              >
+                <Ionicons name={showPassword ? "eye-off-outline" : "eye-outline"} size={19} color={theme.textMuted} />
+              </TouchableOpacity>
+            </View>
+          </RiseIn>
+
+          <RiseIn delay={290} style={{ alignSelf: "flex-end" }}>
+            <TouchableOpacity onPress={openForgotPassword} activeOpacity={0.6} style={{ paddingVertical: 4 }}>
+              <Text style={styles.forgotText}>Forgot password?</Text>
+            </TouchableOpacity>
+          </RiseIn>
+
+          <RiseIn delay={320}>
+            <PressScale onPress={handleLogin} disabled={loading || googleLoading} style={styles.button}>
+              {loading ? (
+                <ActivityIndicator color="#fff" />
+              ) : (
+                <Text style={styles.buttonText}>Login</Text>
+              )}
+            </PressScale>
+          </RiseIn>
+
+          <RiseIn delay={360}>
+            <Text style={styles.hint}>
+              Use the same email/password or Google account as your login on sarvodayaadhyeta.online
+            </Text>
+          </RiseIn>
+        </Animated.ScrollView>
+      </KeyboardAvoidingView>
 
       <Modal visible={forgotVisible} transparent animationType="fade" onRequestClose={() => setForgotVisible(false)}>
-        <View style={styles.modalBackdrop}>
+        <KeyboardAvoidingView
+          style={styles.modalBackdrop}
+          behavior={Platform.OS === "ios" ? "padding" : undefined}
+        >
           <View style={styles.modalCard}>
             <Text style={styles.modalTitle}>Reset your password</Text>
             <Text style={styles.modalSubtitle}>
@@ -227,6 +273,7 @@ export default function LoginScreen() {
               placeholder="you@example.com"
               placeholderTextColor={theme.textMuted}
               autoCapitalize="none"
+              autoCorrect={false}
               keyboardType="email-address"
               value={forgotEmail}
               onChangeText={setForgotEmail}
@@ -241,27 +288,22 @@ export default function LoginScreen() {
               >
                 <Text style={styles.modalCancelText}>Cancel</Text>
               </TouchableOpacity>
-              <Animated.View style={{ flex: 1, transform: [{ scale: sendResetTap.scale }] }}>
-                <TouchableOpacity
-                  style={[styles.modalButton, styles.modalSendButton]}
-                  onPress={handleSendReset}
-                  onPressIn={sendResetTap.onPressIn}
-                  onPressOut={sendResetTap.onPressOut}
-                  disabled={forgotSending}
-                  activeOpacity={1}
-                >
-                  {forgotSending ? (
-                    <ActivityIndicator color={theme.navyDark} />
-                  ) : (
-                    <Text style={styles.modalSendText}>Send Link</Text>
-                  )}
-                </TouchableOpacity>
-              </Animated.View>
+              <PressScale
+                onPress={handleSendReset}
+                disabled={forgotSending}
+                style={[styles.modalButton, styles.modalSendButton, { flex: 1 }]}
+              >
+                {forgotSending ? (
+                  <ActivityIndicator color={theme.navyDark} />
+                ) : (
+                  <Text style={styles.modalSendText}>Send Link</Text>
+                )}
+              </PressScale>
             </View>
           </View>
-        </View>
+        </KeyboardAvoidingView>
       </Modal>
-    </KeyboardAvoidingView>
+    </View>
   );
 }
 
@@ -272,8 +314,28 @@ const styles = StyleSheet.create({
   },
   hero: {
     alignItems: "center",
-    paddingTop: 64,
     paddingBottom: 36,
+    overflow: "hidden",
+  },
+  blobA: {
+    position: "absolute",
+    top: -30,
+    right: -40,
+    width: 140,
+    height: 140,
+    borderRadius: 70,
+    backgroundColor: theme.goldLight,
+    opacity: 0.14,
+  },
+  blobB: {
+    position: "absolute",
+    bottom: -20,
+    left: -30,
+    width: 100,
+    height: 100,
+    borderRadius: 50,
+    backgroundColor: "#ffffff",
+    opacity: 0.08,
   },
   logoRing: {
     width: 96,
@@ -298,6 +360,7 @@ const styles = StyleSheet.create({
     fontWeight: "700",
     color: "#fff",
     letterSpacing: 0.3,
+    textAlign: "center",
   },
   tagline: {
     fontSize: 12,
@@ -314,7 +377,6 @@ const styles = StyleSheet.create({
     borderTopRightRadius: 28,
     paddingHorizontal: 24,
     paddingTop: 28,
-    paddingBottom: 24,
   },
   subtitle: {
     fontSize: 15,
@@ -363,6 +425,26 @@ const styles = StyleSheet.create({
     marginBottom: 14,
     backgroundColor: "#fff",
     color: theme.textPrimary,
+  },
+  passwordRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    borderWidth: 1,
+    borderColor: theme.border,
+    borderRadius: 14,
+    backgroundColor: "#fff",
+    marginBottom: 14,
+    paddingRight: 8,
+  },
+  passwordInput: {
+    flex: 1,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    fontSize: 15,
+    color: theme.textPrimary,
+  },
+  eyeButton: {
+    padding: 8,
   },
   forgotText: {
     fontSize: 12.5,
