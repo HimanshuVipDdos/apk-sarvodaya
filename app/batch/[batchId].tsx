@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
-import { View, Text, StyleSheet, ScrollView, ActivityIndicator, TouchableOpacity, Linking, Image, Animated } from "react-native";
+import { View, Text, StyleSheet, ScrollView, ActivityIndicator, TouchableOpacity, Image, Animated } from "react-native";
 import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
 import { supabase } from "@/lib/supabase";
 import { theme } from "@/lib/theme";
@@ -280,7 +280,15 @@ export default function BatchDetailScreen() {
             onRetry={loadMaterials}
             emptyText="No notes/DPPs uploaded yet."
             renderItem={(m: Material) => (
-              <TouchableOpacity key={m.id} style={styles.card} activeOpacity={0.8} onPress={() => m.file_url && Linking.openURL(m.file_url)}>
+              <TouchableOpacity
+                key={m.id}
+                style={styles.card}
+                activeOpacity={0.8}
+                onPress={() =>
+                  m.file_url &&
+                  router.push({ pathname: "/notes-viewer", params: { url: m.file_url, title: m.title } })
+                }
+              >
                 <Text style={styles.pdfIcon}>📄</Text>
                 <View style={{ flex: 1, marginLeft: 10 }}>
                   <Text style={styles.cardTitle}>{m.title}</Text>

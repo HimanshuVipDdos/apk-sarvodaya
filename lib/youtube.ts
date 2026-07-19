@@ -39,17 +39,29 @@ export function buildYouTubeEmbedHtml(videoId: string, opts?: { autoplay?: boole
 <body>
   <div id="player"></div>
   <script>
-    var tag = document.createElement('script');
-    tag.src = "https://www.youtube.com/iframe_api";
-    document.body.appendChild(tag);
-
     var player;
     var ended = false;
+    var apiReady = false;
     function post(type, data) {
       if (window.ReactNativeWebView) {
         window.ReactNativeWebView.postMessage(JSON.stringify({ type: type, data: data || null }));
       }
     }
+
+    var tag = document.createElement('script');
+    tag.src = "https://www.youtube.com/iframe_api";
+    // If the IFrame API script itself can't load (blocked/offline/etc.) we'd
+    // otherwise sit here forever with nothing on screen and no error event --
+    // that also looks like a broken player to the student. Surface it.
+    tag.onerror = function () { post('unavailable', 'script_load_failed'); };
+    document.body.appendChild(tag);
+
+    // Belt-and-braces: some embedding-disabled videos never fire onError at
+    // all, they just never become ready. If the API hasn't reported ready
+    // within 10s, treat it as unavailable too.
+    setTimeout(function () {
+      if (!apiReady) post('unavailable', 'timeout');
+    }, 10000);
 
     function onYouTubeIframeAPIReady() {
       player = new YT.Player('player', {
@@ -65,7 +77,7 @@ export function buildYouTubeEmbedHtml(videoId: string, opts?: { autoplay?: boole
           origin: 'https://www.youtube.com'
         },
         events: {
-          onReady: function () { post('ready'); },
+          onReady: function () { apiReady = true; post('ready'); },
           onStateChange: function (e) {
             // 0 = ended, 1 = playing, 2 = paused, 3 = buffering
             if (e.data === 0 && !ended) {
@@ -74,7 +86,16 @@ export function buildYouTubeEmbedHtml(videoId: string, opts?: { autoplay?: boole
             }
             if (e.data === 1) post('playing');
           },
-          onError: function (e) { post('error', e.data); }
+          // YT error codes: 2 = bad videoId, 5 = HTML5 player error,
+          // 100 = video not found/private, 101 & 150 = embedding disabled
+          // by the video owner. 100/101/150 are what actually render as
+          // "Video unavailable" inside the iframe -- treat those as a hard
+          // failure so the app can swap in its own "Watch on YouTube" button
+          // instead of leaving YouTube's broken embed on screen.
+          onError: function (e) {
+            post('error', e.data);
+            if ([100, 101, 150].indexOf(e.data) !== -1) post('unavailable', e.data);
+          }
         }
       });
     }

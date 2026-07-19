@@ -10,8 +10,11 @@ import {
   KeyboardAvoidingView,
   Platform,
   Dimensions,
+  Linking,
 } from "react-native";
 import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
+import { StatusBar } from "expo-status-bar";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { WebView, type WebViewNavigation } from "react-native-webview";
 import { Ionicons } from "@expo/vector-icons";
 import { supabase } from "@/lib/supabase";
@@ -44,14 +47,18 @@ function isAllowedNavigation(url: string) {
 export default function LiveClassScreen() {
   const { liveClassId } = useLocalSearchParams<{ liveClassId: string }>();
   const router = useRouter();
+  const insets = useSafeAreaInsets();
 
   const [loading, setLoading] = useState(true);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [liveClass, setLiveClass] = useState<LiveClassInfo | null>(null);
   const [ended, setEnded] = useState(false);
+  const [playerUnavailable, setPlayerUnavailable] = useState(false);
   const [chatInput, setChatInput] = useState("");
+  const [sending, setSending] = useState(false);
   const savedRef = useRef(false);
   const listRef = useRef<FlatList>(null);
+  const hasLoadedOnce = useRef(false);
 
   const { messages, loading: chatLoading, send } = useLiveChat(liveClassId ?? "");
 
@@ -61,8 +68,13 @@ export default function LiveClassScreen() {
 
   const load = useCallback(async () => {
     if (!liveClassId) return;
-    setLoading(true);
-    setErrorMsg(null);
+    // Only show the full-screen loader on the very first load. Refetching
+    // on every focus regain (e.g. student switches apps and comes back) must
+    // NOT flip `loading` back to true — that would swap out this whole
+    // screen's tree, unmounting the video WebView and restarting playback
+    // from 0 every single time. Metadata (title / is_live badge) still
+    // refreshes quietly in the background.
+    if (!hasLoadedOnce.current) setLoading(true);
     const { data, error } = await supabase
       .from("live_classes")
       .select("id,title,is_live,youtube_url,batch_id")
@@ -70,14 +82,20 @@ export default function LiveClassScreen() {
       .maybeSingle();
 
     if (error) {
-      setErrorMsg(error.message);
+      console.warn("[live] load failed:", error.message);
+      // Never blow away a live class that's already playing just because a
+      // background metadata refresh hiccuped — only surface the error
+      // screen if we have nothing on screen yet.
+      if (!liveClass) setErrorMsg(error.message);
     } else if (!data) {
-      setErrorMsg("This class could not be found.");
+      if (!liveClass) setErrorMsg("This class could not be found.");
     } else {
       setLiveClass(data as any);
+      setErrorMsg(null);
     }
     setLoading(false);
-  }, [liveClassId]);
+    hasLoadedOnce.current = true;
+  }, [liveClassId, liveClass]);
 
   useFocusEffect(
     useCallback(() => {
@@ -125,10 +143,17 @@ export default function LiveClassScreen() {
     try {
       const msg = JSON.parse(event.nativeEvent.data);
       if (msg.type === "ended") handleVideoEnded();
+      if (msg.type === "unavailable") setPlayerUnavailable(true);
     } catch {
       // ignore malformed messages
     }
   }
+
+  // Reset the fallback state whenever we're pointed at a different video
+  // (e.g. student backs out of a live class and opens a different one).
+  useEffect(() => {
+    setPlayerUnavailable(false);
+  }, [liveClass?.youtube_url]);
 
   // Belt-and-braces: even if our JS click-blocker inside the page misses a
   // case, the WebView itself refuses to navigate anywhere off-allowlist.
@@ -158,8 +183,14 @@ export default function LiveClassScreen() {
   const videoId = extractYouTubeId(liveClass.youtube_url);
 
   return (
-    <KeyboardAvoidingView style={{ flex: 1, backgroundColor: "#000" }} behavior={Platform.OS === "ios" ? "padding" : undefined}>
-      <View style={styles.topBar}>
+    <KeyboardAvoidingView
+      style={{ flex: 1, backgroundColor: "#000" }}
+      behavior={Platform.OS === "ios" ? "padding" : "height"}
+    >
+      {/* This screen is a full black background — status bar icons need to
+          be light here, regardless of the app-wide "dark" default. */}
+      <StatusBar style="light" />
+      <View style={[styles.topBar, { paddingTop: insets.top + 10 }]}>
         <TouchableOpacity onPress={() => router.back()} hitSlop={10}>
           <Ionicons name="chevron-back" size={24} color="#fff" />
         </TouchableOpacity>
@@ -175,12 +206,14 @@ export default function LiveClassScreen() {
         )}
       </View>
 
-      {videoId ? (
+      {videoId && !playerUnavailable ? (
         <View style={{ width: SCREEN_W, height: PLAYER_HEIGHT, backgroundColor: "#000" }}>
           <WebView
+            key={videoId}
             source={{ html: buildYouTubeEmbedHtml(videoId, { autoplay: true }), baseUrl: "https://www.youtube.com" }}
             onMessage={onWebViewMessage}
             onShouldStartLoadWithRequest={onShouldStartLoad}
+            onHttpError={() => setPlayerUnavailable(true)}
             allowsFullscreenVideo
             allowsInlineMediaPlayback
             mediaPlaybackRequiresUserAction={false}
@@ -192,7 +225,20 @@ export default function LiveClassScreen() {
         </View>
       ) : (
         <View style={[styles.center, { height: PLAYER_HEIGHT }]}>
-          <Text style={styles.errorText}>Video link not available for this class.</Text>
+          <Ionicons name="videocam-off-outline" size={28} color="#9aa3c7" style={{ marginBottom: 10 }} />
+          <Text style={styles.errorText}>
+            {videoId
+              ? "This video can't be played inside the app right now."
+              : "Video link not available for this class."}
+          </Text>
+          {videoId ? (
+            <TouchableOpacity
+              style={styles.backBtn}
+              onPress={() => Linking.openURL(liveClass.youtube_url ?? `https://www.youtube.com/watch?v=${videoId}`)}
+            >
+              <Text style={styles.backBtnText}>Watch on YouTube</Text>
+            </TouchableOpacity>
+          ) : null}
         </View>
       )}
 
@@ -237,19 +283,23 @@ export default function LiveClassScreen() {
             maxLength={500}
           />
           <TouchableOpacity
-            style={styles.sendBtn}
+            style={[styles.sendBtn, sending && { opacity: 0.6 }]}
+            disabled={sending || !chatInput.trim()}
             onPress={async () => {
-              if (!chatInput.trim()) return;
+              if (!chatInput.trim() || sending) return;
               const text = chatInput;
               setChatInput("");
+              setSending(true);
               try {
                 await send(text);
               } catch (err: any) {
                 setChatInput(text);
+              } finally {
+                setSending(false);
               }
             }}
           >
-            <Ionicons name="send" size={16} color="#fff" />
+            {sending ? <ActivityIndicator color="#fff" size="small" /> : <Ionicons name="send" size={16} color="#fff" />}
           </TouchableOpacity>
         </View>
       </View>
@@ -266,7 +316,6 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     gap: 10,
-    paddingTop: Platform.OS === "ios" ? 50 : 14,
     paddingBottom: 12,
     paddingHorizontal: 14,
     backgroundColor: "#000",

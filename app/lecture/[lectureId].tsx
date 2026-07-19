@@ -1,5 +1,5 @@
-import { useCallback, useState } from "react";
-import { View, Text, StyleSheet, ActivityIndicator, TouchableOpacity, Platform, Dimensions } from "react-native";
+import { useCallback, useEffect, useState } from "react";
+import { View, Text, StyleSheet, ActivityIndicator, TouchableOpacity, Platform, Dimensions, Linking } from "react-native";
 import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
 import { WebView, type WebViewNavigation } from "react-native-webview";
 import { Ionicons } from "@expo/vector-icons";
@@ -24,6 +24,7 @@ export default function LectureScreen() {
   const [loading, setLoading] = useState(true);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [lecture, setLecture] = useState<LectureInfo | null>(null);
+  const [playerUnavailable, setPlayerUnavailable] = useState(false);
 
   const load = useCallback(async () => {
     if (!lectureId) return;
@@ -46,6 +47,19 @@ export default function LectureScreen() {
       load();
     }, [load])
   );
+
+  useEffect(() => {
+    setPlayerUnavailable(false);
+  }, [lecture?.youtube_url]);
+
+  function onWebViewMessage(event: { nativeEvent: { data: string } }) {
+    try {
+      const msg = JSON.parse(event.nativeEvent.data);
+      if (msg.type === "unavailable") setPlayerUnavailable(true);
+    } catch {
+      // ignore malformed messages
+    }
+  }
 
   if (loading) {
     return (
@@ -80,11 +94,14 @@ export default function LectureScreen() {
         <View style={{ width: 24 }} />
       </View>
 
-      {videoId ? (
+      {videoId && !playerUnavailable ? (
         <View style={{ width: SCREEN_W, height: PLAYER_HEIGHT, backgroundColor: "#000" }}>
           <WebView
+            key={videoId}
             source={{ html: buildYouTubeEmbedHtml(videoId), baseUrl: "https://www.youtube.com" }}
+            onMessage={onWebViewMessage}
             onShouldStartLoadWithRequest={(req: WebViewNavigation) => isAllowedNavigation(req.url)}
+            onHttpError={() => setPlayerUnavailable(true)}
             allowsFullscreenVideo
             allowsInlineMediaPlayback
             mediaPlaybackRequiresUserAction={false}
@@ -96,7 +113,20 @@ export default function LectureScreen() {
         </View>
       ) : (
         <View style={[styles.center, { height: PLAYER_HEIGHT }]}>
-          <Text style={styles.errorText}>Video link not available for this lecture.</Text>
+          <Ionicons name="videocam-off-outline" size={28} color="#9aa3c7" style={{ marginBottom: 10 }} />
+          <Text style={styles.errorText}>
+            {videoId
+              ? "This video can't be played inside the app right now."
+              : "Video link not available for this lecture."}
+          </Text>
+          {videoId ? (
+            <TouchableOpacity
+              style={styles.backBtn}
+              onPress={() => Linking.openURL(lecture.youtube_url ?? `https://www.youtube.com/watch?v=${videoId}`)}
+            >
+              <Text style={styles.backBtnText}>Watch on YouTube</Text>
+            </TouchableOpacity>
+          ) : null}
         </View>
       )}
 
