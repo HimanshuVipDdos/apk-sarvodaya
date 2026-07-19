@@ -58,8 +58,10 @@ export default function DashboardScreen() {
   const router = useRouter();
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [loadError, setLoadError] = useState(false);
   const [fullName, setFullName] = useState<string>("");
   const [enrollments, setEnrollments] = useState<Enrollment[]>([]);
+  const hasLoadedOnce = useRef(false);
 
   const pulse = usePulse(loading);
   const blobFloat = useFloat(12, 3600);
@@ -87,17 +89,25 @@ export default function DashboardScreen() {
 
       setFullName(profileRes.data?.full_name ?? "Student");
       setEnrollments((enrollmentsRes.data as any) ?? []);
+      setLoadError(false);
     } catch (err) {
       console.warn("[dashboard] load failed:", err);
+      // Keep whatever data was already on screen — only flag the error,
+      // never silently swap real data for a misleading empty state.
+      setLoadError(true);
     } finally {
       setLoading(false);
       setRefreshing(false);
+      hasLoadedOnce.current = true;
     }
   }, [session?.user?.id]);
 
   useFocusEffect(
     useCallback(() => {
-      setLoading(true);
+      // Full skeleton only on true first mount. Returning to this tab after
+      // it has already loaded once refreshes quietly in the background —
+      // no full-screen flash every time the tab regains focus.
+      if (!hasLoadedOnce.current) setLoading(true);
       load();
     }, [load])
   );
@@ -162,6 +172,18 @@ export default function DashboardScreen() {
           </View>
         </RiseIn>
       </View>
+
+      {loadError && (
+        <RiseIn style={{ paddingHorizontal: 20, marginTop: 14 }}>
+          <View style={styles.errorBanner}>
+            <Ionicons name="cloud-offline-outline" size={16} color={theme.dangerText} />
+            <Text style={styles.errorBannerText}>Couldn't refresh your data. Showing last saved info.</Text>
+            <PressScale onPress={load} style={styles.errorRetryButton}>
+              <Text style={styles.errorRetryText}>Retry</Text>
+            </PressScale>
+          </View>
+        </RiseIn>
+      )}
 
       {/* Homepage promo slider — same hero_slides content as the website */}
       <RiseIn delay={260} style={{ marginTop: 16 }}>
@@ -294,6 +316,19 @@ const styles = StyleSheet.create({
     borderTopColor: "rgba(255,255,255,0.12)",
   },
   quoteText: { flex: 1, fontSize: 12, color: "#e4e8fb", fontStyle: "italic", lineHeight: 17 },
+
+  errorBanner: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    backgroundColor: theme.danger,
+    borderRadius: 12,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+  },
+  errorBannerText: { flex: 1, fontSize: 12, color: theme.dangerText, fontWeight: "600" },
+  errorRetryButton: { paddingHorizontal: 10, paddingVertical: 5, borderRadius: 8, backgroundColor: "#fff" },
+  errorRetryText: { fontSize: 11.5, fontWeight: "700", color: theme.dangerText },
 
   sectionHeader: { flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 10 },
   sectionTitle: { fontSize: 15, fontWeight: "700", color: theme.textPrimary },
