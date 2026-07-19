@@ -45,7 +45,15 @@ async function callCbtApi<T>(action: string, payload: Record<string, unknown> = 
     throw new Error(`Unexpected server response (status ${res.status}). Please try again.`);
   }
 
-  if (!res.ok) throw new Error(json?.error ?? "Something went wrong.");
+  if (!res.ok) {
+    const err = new Error(json?.error ?? "Something went wrong.") as Error & {
+      code?: string;
+      attemptId?: string;
+    };
+    err.code = json?.code;
+    err.attemptId = json?.attempt_id;
+    throw err;
+  }
   return json as T;
 }
 

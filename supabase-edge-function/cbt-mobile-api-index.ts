@@ -69,7 +69,10 @@ Deno.serve(async (req) => {
         .maybeSingle();
 
       if (existing && existing.status === "submitted") {
-        return json({ error: "You have already submitted this test." }, 400);
+        return json(
+          { error: "You have already submitted this test.", code: "already_submitted", attempt_id: existing.id },
+          400
+        );
       }
 
       let attemptId = existing?.id as string | undefined;

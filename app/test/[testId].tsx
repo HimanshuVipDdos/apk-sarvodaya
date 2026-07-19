@@ -127,10 +127,15 @@ export default function TestTakingScreen() {
         }
         setLoading(false);
       } catch (e: any) {
-        if (!cancelled) {
-          setError(e.message ?? "Could not load this test.");
-          setLoading(false);
+        if (cancelled) return;
+        // Already submitted this test before — don't dead-end on an error,
+        // take the student straight to their existing result/analysis.
+        if (e?.code === "already_submitted" && e?.attemptId) {
+          router.replace({ pathname: "/test/result/[attemptId]", params: { attemptId: e.attemptId } });
+          return;
         }
+        setError(e.message ?? "Could not load this test.");
+        setLoading(false);
       }
     })();
     return () => {
