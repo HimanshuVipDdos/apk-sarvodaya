@@ -1,5 +1,5 @@
-import { useCallback, useState } from "react";
-import { View, Text, StyleSheet, ScrollView, ActivityIndicator, TouchableOpacity, Linking, Image } from "react-native";
+import { useCallback, useRef, useState } from "react";
+import { View, Text, StyleSheet, ScrollView, ActivityIndicator, TouchableOpacity, Linking, Image, Animated } from "react-native";
 import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
 import { supabase } from "@/lib/supabase";
 import { theme } from "@/lib/theme";
@@ -30,19 +30,28 @@ export default function BatchDetailScreen() {
   const router = useRouter();
   const [tab, setTab] = useState<Tab>("Live");
   const [loading, setLoading] = useState(true);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [batchInfo, setBatchInfo] = useState<BatchInfo | null>(null);
   const [liveClasses, setLiveClasses] = useState<LiveClass[]>([]);
   const [lectures, setLectures] = useState<Lecture[]>([]);
   const [tests, setTests] = useState<CbtTest[]>([]);
   const [materials, setMaterials] = useState<Material[]>([]);
+  const fadeAnim = useRef(new Animated.Value(0)).current;
 
-  useFocusEffect(
-    useCallback(() => {
-      let cancelled = false;
-      (async () => {
-        setLoading(true);
-        await supabase.rpc("tick_live_classes").catch(() => {});
+  const loadData = useCallback(
+    async (cancelledRef: { current: boolean }) => {
+      setLoading(true);
+      setErrorMsg(null);
+      fadeAnim.setValue(0);
 
+      // Best-effort: flips is_live flags server-side. Never let this block the page.
+      try {
+        await supabase.rpc("tick_live_classes");
+      } catch {
+        // non-critical — ignore silently
+      }
+
+      try {
         const [batchRes, liveRes, lecRes, testRes, matRes] = await Promise.all([
           supabase.from("batches").select("title, thumbnail_url, fees_inr, original_fees_inr, exam_category, duration").eq("id", batchId).maybeSingle(),
           supabase.from("live_classes").select("id,title,is_live,scheduled_at,youtube_url").eq("batch_id", batchId).order("scheduled_at", { ascending: false }),
@@ -51,19 +60,40 @@ export default function BatchDetailScreen() {
           supabase.from("study_materials").select("id,title,file_url,material_type").eq("batch_id", batchId).order("created_at", { ascending: false }),
         ]);
 
-        if (!cancelled) {
-          setBatchInfo((batchRes.data as any) ?? null);
-          setLiveClasses((liveRes.data as any) ?? []);
-          setLectures((lecRes.data as any) ?? []);
-          setTests((testRes.data as any) ?? []);
-          setMaterials((matRes.data as any) ?? []);
-          setLoading(false);
-        }
-      })();
+        if (cancelledRef.current) return;
+
+        if (batchRes.error) throw batchRes.error;
+
+        setBatchInfo((batchRes.data as any) ?? null);
+        setLiveClasses((liveRes.data as any) ?? []);
+        setLectures((lecRes.data as any) ?? []);
+        setTests((testRes.data as any) ?? []);
+        setMaterials((matRes.data as any) ?? []);
+        setLoading(false);
+
+        Animated.timing(fadeAnim, {
+          toValue: 1,
+          duration: 320,
+          useNativeDriver: true,
+        }).start();
+      } catch (err: any) {
+        if (cancelledRef.current) return;
+        console.warn("Failed to load batch:", err);
+        setErrorMsg(err?.message ?? "Couldn't load this batch. Check your connection and try again.");
+        setLoading(false);
+      }
+    },
+    [batchId, fadeAnim]
+  );
+
+  useFocusEffect(
+    useCallback(() => {
+      const cancelledRef = { current: false };
+      loadData(cancelledRef);
       return () => {
-        cancelled = true;
+        cancelledRef.current = true;
       };
-    }, [batchId])
+    }, [loadData])
   );
 
   if (loading) {
@@ -74,8 +104,24 @@ export default function BatchDetailScreen() {
     );
   }
 
+  if (errorMsg) {
+    return (
+      <View style={styles.center}>
+        <Text style={styles.errorTitle}>Something went wrong</Text>
+        <Text style={styles.errorText}>{errorMsg}</Text>
+        <TouchableOpacity
+          style={styles.retryButton}
+          activeOpacity={0.85}
+          onPress={() => loadData({ current: false })}
+        >
+          <Text style={styles.retryButtonText}>Retry</Text>
+        </TouchableOpacity>
+      </View>
+    );
+  }
+
   return (
-    <View style={styles.container}>
+    <Animated.View style={[styles.container, { opacity: fadeAnim }]}>
       <View style={styles.header}>
         {batchInfo?.thumbnail_url ? (
           <Image
@@ -107,7 +153,7 @@ export default function BatchDetailScreen() {
 
       <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.tabBar}>
         {TABS.map((t) => (
-          <TouchableOpacity key={t} style={[styles.tab, tab === t && styles.tabActive]} onPress={() => setTab(t)}>
+          <TouchableOpacity key={t} style={[styles.tab, tab === t && styles.tabActive]} onPress={() => setTab(t)} activeOpacity={0.8}>
             <Text style={[styles.tabText, tab === t && styles.tabTextActive]}>{t}</Text>
           </TouchableOpacity>
         ))}
@@ -122,6 +168,7 @@ export default function BatchDetailScreen() {
               <TouchableOpacity
                 key={lc.id}
                 style={styles.card}
+                activeOpacity={0.8}
                 onPress={() => router.push({ pathname: "/live/[liveClassId]", params: { liveClassId: lc.id } })}
               >
                 <View style={{ flex: 1 }}>
@@ -161,6 +208,7 @@ export default function BatchDetailScreen() {
               <TouchableOpacity
                 key={t.id}
                 style={styles.card}
+                activeOpacity={0.8}
                 onPress={() => router.push({ pathname: "/test/[testId]", params: { testId: t.id } })}
               >
                 <Text style={styles.cardTitle}>{t.title}</Text>
@@ -177,6 +225,7 @@ export default function BatchDetailScreen() {
               <TouchableOpacity
                 key={m.id}
                 style={styles.card}
+                activeOpacity={0.8}
                 onPress={() => m.file_url && Linking.openURL(m.file_url)}
               >
                 <Text style={styles.pdfIcon}>📄</Text>
@@ -188,7 +237,7 @@ export default function BatchDetailScreen() {
             ))
           ))}
       </ScrollView>
-    </View>
+    </Animated.View>
   );
 }
 
@@ -202,7 +251,11 @@ function Empty({ text }: { text: string }) {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: "#f7f8fc" },
-  center: { flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: "#f7f8fc" },
+  center: { flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: "#f7f8fc", paddingHorizontal: 30 },
+  errorTitle: { fontSize: 15, fontWeight: "700", color: "#12183a", marginBottom: 6 },
+  errorText: { fontSize: 13, color: "#9ba0bd", textAlign: "center", marginBottom: 18 },
+  retryButton: { backgroundColor: "#17358a", borderRadius: 12, paddingHorizontal: 24, paddingVertical: 11 },
+  retryButtonText: { color: "#fff", fontWeight: "700", fontSize: 13 },
   header: { backgroundColor: "#17358a", position: "relative", overflow: "hidden" },
   headerContent: { paddingTop: 50, paddingHorizontal: 18, paddingBottom: 16 },
   headerCategory: { fontSize: 10, fontWeight: "700", color: "#d4af37", textTransform: "uppercase", letterSpacing: 0.6 },
