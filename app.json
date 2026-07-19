@@ -35,10 +35,12 @@
       ]
     ],
     "extra": {
-  "eas": {
-    "projectId": "c9a9638f-f033-400e-9b2d-08f0174b533b"
-  },
-  "router": {
-    "origin": false
+      "eas": {
+        "projectId": "c9a9638f-f033-400e-9b2d-08f0174b533b"
+      },
+      "router": {
+        "origin": false
+      }
+    }
   }
 }
