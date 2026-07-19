@@ -209,6 +209,10 @@ export default function LiveClassScreen() {
           data={messages}
           keyExtractor={(m) => m.id}
           contentContainerStyle={{ padding: 12, gap: 8 }}
+          removeClippedSubviews
+          initialNumToRender={15}
+          maxToRenderPerBatch={10}
+          windowSize={10}
           onContentSizeChange={() => listRef.current?.scrollToEnd({ animated: true })}
           ListEmptyComponent={
             chatLoading ? null : <Text style={styles.chatEmpty}>No messages yet — say hi 👋</Text>

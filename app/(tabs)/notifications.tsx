@@ -3,6 +3,7 @@ import { View, Text, FlatList, StyleSheet, ActivityIndicator, TouchableOpacity, 
 import { useFocusEffect } from "expo-router";
 import { supabase } from "@/lib/supabase";
 import { theme } from "@/lib/theme";
+import { withTimeout } from "@/lib/with-timeout";
 
 // Matches the real `notifications` table schema used by the website's admin
 // panel (src/routes/_authenticated/admin.notifications.tsx): title,
@@ -35,15 +36,18 @@ export default function NotificationsScreen() {
       let cancelled = false;
       (async () => {
         setLoading(true);
-        const { data, error } = await supabase
-          .from("notifications")
-          .select("*")
-          .eq("is_active", true)
-          .order("created_at", { ascending: false });
-        if (!cancelled) {
+        try {
+          const { data, error } = await withTimeout(
+            supabase.from("notifications").select("*").eq("is_active", true).order("created_at", { ascending: false })
+          );
+          if (cancelled) return;
           if (error) console.warn(error.message);
           setNotices((data as any) ?? []);
-          setLoading(false);
+        } catch (err) {
+          console.warn("[notifications] load failed:", err);
+          if (!cancelled) setNotices([]);
+        } finally {
+          if (!cancelled) setLoading(false);
         }
       })();
       return () => {
@@ -66,6 +70,10 @@ export default function NotificationsScreen() {
       contentContainerStyle={{ padding: 20 }}
       data={notices}
       keyExtractor={(item) => item.id}
+      removeClippedSubviews
+      initialNumToRender={8}
+      maxToRenderPerBatch={8}
+      windowSize={7}
       ListEmptyComponent={
         <View style={styles.emptyCard}>
           <Text style={styles.emptyText}>No notices yet.</Text>

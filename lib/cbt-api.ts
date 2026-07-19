@@ -9,17 +9,43 @@ async function callCbtApi<T>(action: string, payload: Record<string, unknown> = 
   if (!token) throw new Error("Not logged in.");
 
   const url = `${process.env.EXPO_PUBLIC_SUPABASE_URL}/functions/v1/cbt-mobile-api`;
-  const res = await fetch(url, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${token}`,
-    },
-    body: JSON.stringify({ action, ...payload }),
-  });
 
-  const json = await res.json();
-  if (!res.ok) throw new Error(json.error ?? "Something went wrong.");
+  // Without this, a hanging/slow edge function leaves the test screen's
+  // "loading" spinner stuck forever — exactly the bug we fixed elsewhere.
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 20000);
+
+  let res: Response;
+  try {
+    res = await fetch(url, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({ action, ...payload }),
+      signal: controller.signal,
+    });
+  } catch (err: any) {
+    if (err?.name === "AbortError") {
+      throw new Error("This is taking too long. Check your connection and try again.");
+    }
+    throw new Error("Couldn't reach the server. Check your connection and try again.");
+  } finally {
+    clearTimeout(timeout);
+  }
+
+  // The server can fail with a non-JSON body (proxy/HTML error page, empty
+  // response, etc.) — parsing that as JSON would throw a confusing error,
+  // so this always surfaces a clean message instead.
+  let json: any;
+  try {
+    json = await res.json();
+  } catch {
+    throw new Error(`Unexpected server response (status ${res.status}). Please try again.`);
+  }
+
+  if (!res.ok) throw new Error(json?.error ?? "Something went wrong.");
   return json as T;
 }
 

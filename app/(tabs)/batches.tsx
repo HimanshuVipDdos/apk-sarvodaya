@@ -4,6 +4,7 @@ import { useFocusEffect, useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { supabase } from "@/lib/supabase";
 import { theme } from "@/lib/theme";
+import { withTimeout } from "@/lib/with-timeout";
 
 // Matches the real `batches` table schema used on the website
 // (src/routes/batches.tsx): title, thumbnail_url, fees_inr,
@@ -35,16 +36,23 @@ export default function BatchesScreen() {
       let cancelled = false;
       (async () => {
         setLoading(true);
-        const { data, error } = await supabase
-          .from("batches")
-          .select("id, title, description, thumbnail_url, exam_category, duration, fees_inr, original_fees_inr, is_featured")
-          .eq("is_active", true)
-          .order("is_featured", { ascending: false })
-          .order("title", { ascending: true });
-        if (!cancelled) {
+        try {
+          const { data, error } = await withTimeout(
+            supabase
+              .from("batches")
+              .select("id, title, description, thumbnail_url, exam_category, duration, fees_inr, original_fees_inr, is_featured")
+              .eq("is_active", true)
+              .order("is_featured", { ascending: false })
+              .order("title", { ascending: true })
+          );
+          if (cancelled) return;
           if (error) console.warn(error.message);
           setBatches((data as any) ?? []);
-          setLoading(false);
+        } catch (err) {
+          console.warn("[batches] load failed:", err);
+          if (!cancelled) setBatches([]);
+        } finally {
+          if (!cancelled) setLoading(false);
         }
       })();
       return () => {
@@ -67,6 +75,10 @@ export default function BatchesScreen() {
       contentContainerStyle={{ padding: 16 }}
       data={batches}
       keyExtractor={(item) => item.id}
+      removeClippedSubviews
+      initialNumToRender={6}
+      maxToRenderPerBatch={6}
+      windowSize={7}
       ListEmptyComponent={
         <View style={styles.emptyCard}>
           <Ionicons name="school-outline" size={28} color={theme.textMuted} />

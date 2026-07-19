@@ -4,6 +4,7 @@ import { useFocusEffect, useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { supabase } from "@/lib/supabase";
 import { theme } from "@/lib/theme";
+import { withTimeout } from "@/lib/with-timeout";
 
 type CbtTest = {
   id: string;
@@ -22,15 +23,22 @@ export default function TestsScreen() {
       let cancelled = false;
       (async () => {
         setLoading(true);
-        const { data, error } = await supabase
-          .from("cbt_tests")
-          .select("id, title, duration_minutes, marks_per_question")
-          .eq("is_published", true)
-          .order("created_at", { ascending: false });
-        if (!cancelled) {
+        try {
+          const { data, error } = await withTimeout(
+            supabase
+              .from("cbt_tests")
+              .select("id, title, duration_minutes, marks_per_question")
+              .eq("is_published", true)
+              .order("created_at", { ascending: false })
+          );
+          if (cancelled) return;
           if (error) console.warn(error.message);
           setTests((data as any) ?? []);
-          setLoading(false);
+        } catch (err) {
+          console.warn("[tests] load failed:", err);
+          if (!cancelled) setTests([]);
+        } finally {
+          if (!cancelled) setLoading(false);
         }
       })();
       return () => {
@@ -53,6 +61,10 @@ export default function TestsScreen() {
       contentContainerStyle={{ padding: 20 }}
       data={tests}
       keyExtractor={(item) => item.id}
+      removeClippedSubviews
+      initialNumToRender={8}
+      maxToRenderPerBatch={8}
+      windowSize={7}
       ListEmptyComponent={
         <View style={styles.emptyCard}>
           <Ionicons name="document-text-outline" size={28} color={theme.textMuted} />

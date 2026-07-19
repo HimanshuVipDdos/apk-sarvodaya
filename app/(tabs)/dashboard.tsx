@@ -5,6 +5,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/lib/auth-context";
 import { theme } from "@/lib/theme";
+import { withTimeout } from "@/lib/with-timeout";
 import { HeroSlider } from "@/components/HeroSlider";
 
 // Matches the real `batches` table schema (see app/(tabs)/batches.tsx note).
@@ -34,20 +35,31 @@ export default function DashboardScreen() {
 
   const load = useCallback(async () => {
     const userId = session?.user?.id;
-    if (!userId) return;
+    if (!userId) {
+      setLoading(false);
+      setRefreshing(false);
+      return;
+    }
 
-    const [profileRes, enrollmentsRes] = await Promise.all([
-      supabase.from("profiles").select("full_name").eq("id", userId).maybeSingle(),
-      supabase
-        .from("enrollments")
-        .select("id, batch:batches(id, title, thumbnail_url, fees_inr, exam_category)")
-        .eq("user_id", userId),
-    ]);
+    try {
+      const [profileRes, enrollmentsRes] = await withTimeout(
+        Promise.all([
+          supabase.from("profiles").select("full_name").eq("id", userId).maybeSingle(),
+          supabase
+            .from("enrollments")
+            .select("id, batch:batches(id, title, thumbnail_url, fees_inr, exam_category)")
+            .eq("user_id", userId),
+        ])
+      );
 
-    setFullName(profileRes.data?.full_name ?? "Student");
-    setEnrollments((enrollmentsRes.data as any) ?? []);
-    setLoading(false);
-    setRefreshing(false);
+      setFullName(profileRes.data?.full_name ?? "Student");
+      setEnrollments((enrollmentsRes.data as any) ?? []);
+    } catch (err) {
+      console.warn("[dashboard] load failed:", err);
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
   }, [session?.user?.id]);
 
   useFocusEffect(

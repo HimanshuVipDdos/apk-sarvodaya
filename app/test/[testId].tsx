@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { memo, useEffect, useRef, useState } from "react";
 import {
   View,
   Text,
@@ -19,6 +19,71 @@ import {
 
 const OPTION_KEYS = ["a", "b", "c", "d"] as const;
 
+// Ticks every second entirely on its own — the parent screen (question text,
+// options, the palette of every question number) never re-renders because of
+// the clock, only this small pill does. On a long test with 100+ questions
+// this is the difference between smooth scrolling and visible jank every
+// single second.
+const TimerPill = memo(function TimerPill({
+  deadline,
+  onExpire,
+}: {
+  deadline: number;
+  onExpire: () => void;
+}) {
+  const [secondsLeft, setSecondsLeft] = useState(() => Math.max(0, Math.round((deadline - Date.now()) / 1000)));
+  const expiredRef = useRef(false);
+
+  useEffect(() => {
+    expiredRef.current = false;
+    const interval = setInterval(() => {
+      const remaining = Math.max(0, Math.round((deadline - Date.now()) / 1000));
+      setSecondsLeft(remaining);
+      if (remaining <= 0 && !expiredRef.current) {
+        expiredRef.current = true;
+        clearInterval(interval);
+        onExpire();
+      }
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [deadline, onExpire]);
+
+  const mins = Math.floor(secondsLeft / 60);
+  const secs = secondsLeft % 60;
+
+  return (
+    <View style={[styles.timerPill, secondsLeft < 60 && styles.timerPillUrgent]}>
+      <Text style={styles.timerText}>
+        ⏱ {String(mins).padStart(2, "0")}:{String(secs).padStart(2, "0")}
+      </Text>
+    </View>
+  );
+});
+
+// One palette button, memoized: with 100 questions on screen, selecting an
+// answer or moving `current` should only re-paint the 1-2 buttons whose
+// state actually changed, not all 100.
+const PaletteItem = memo(function PaletteItem({
+  index,
+  isAnswered,
+  isCurrent,
+  onPress,
+}: {
+  index: number;
+  isAnswered: boolean;
+  isCurrent: boolean;
+  onPress: () => void;
+}) {
+  return (
+    <TouchableOpacity
+      style={[styles.paletteItem, isAnswered && styles.paletteItemAnswered, isCurrent && styles.paletteItemCurrent]}
+      onPress={onPress}
+    >
+      <Text style={[styles.paletteItemText, (isAnswered || isCurrent) && styles.paletteItemTextActive]}>{index + 1}</Text>
+    </TouchableOpacity>
+  );
+});
+
 export default function TestTakingScreen() {
   const { testId } = useLocalSearchParams<{ testId: string }>();
   const router = useRouter();
@@ -30,9 +95,8 @@ export default function TestTakingScreen() {
   const [questions, setQuestions] = useState<CbtQuestion[]>([]);
   const [current, setCurrent] = useState(0);
   const [answers, setAnswers] = useState<Record<string, "a" | "b" | "c" | "d">>({});
-  const [secondsLeft, setSecondsLeft] = useState<number | null>(null);
+  const [deadline, setDeadline] = useState<number | null>(null);
   const [submitting, setSubmitting] = useState(false);
-  const deadlineRef = useRef<number | null>(null);
   // Mirrors `answers` so the timer's auto-submit (fired from inside a
   // setInterval closure) always reads the LATEST answers, not the empty
   // object captured when the interval was first created.
@@ -40,6 +104,11 @@ export default function TestTakingScreen() {
   useEffect(() => {
     answersRef.current = answers;
   }, [answers]);
+  // Keeps TimerPill's onExpire prop referentially stable across re-renders
+  // (e.g. every time an answer is picked) so its internal interval doesn't
+  // get torn down and recreated for no reason.
+  const handleSubmitRef = useRef<(auto?: boolean) => void>(() => {});
+  const onTimerExpire = useRef(() => handleSubmitRef.current(true)).current;
 
   // Load / resume the attempt
   useEffect(() => {
@@ -54,7 +123,7 @@ export default function TestTakingScreen() {
         if (res.test.duration_minutes) {
           // Absolute deadline (not a countdown that drifts) — matches the
           // ref-based timer fix already used on the website.
-          deadlineRef.current = Date.now() + res.test.duration_minutes * 60_000;
+          setDeadline(Date.now() + res.test.duration_minutes * 60_000);
         }
         setLoading(false);
       } catch (e: any) {
@@ -68,20 +137,6 @@ export default function TestTakingScreen() {
       cancelled = true;
     };
   }, [testId]);
-
-  // Timer tick, based on absolute deadline
-  useEffect(() => {
-    if (!deadlineRef.current) return;
-    const interval = setInterval(() => {
-      const remaining = Math.max(0, Math.round((deadlineRef.current! - Date.now()) / 1000));
-      setSecondsLeft(remaining);
-      if (remaining <= 0) {
-        clearInterval(interval);
-        handleSubmit(true);
-      }
-    }, 1000);
-    return () => clearInterval(interval);
-  }, [deadlineRef.current, attemptId]);
 
   // Block hardware back button mid-test (prevents accidental exit)
   useEffect(() => {
@@ -127,6 +182,7 @@ export default function TestTakingScreen() {
       Alert.alert("Submit failed", e.message ?? "Please try again.");
     }
   }
+  handleSubmitRef.current = handleSubmit;
 
   if (loading) {
     return (
@@ -150,8 +206,6 @@ export default function TestTakingScreen() {
 
   const q = questions[current];
   const answeredCount = Object.keys(answers).length;
-  const mins = secondsLeft != null ? Math.floor(secondsLeft / 60) : null;
-  const secs = secondsLeft != null ? secondsLeft % 60 : null;
 
   return (
     <View style={styles.container}>
@@ -159,13 +213,7 @@ export default function TestTakingScreen() {
         <Text style={styles.testTitle} numberOfLines={1}>
           {testTitle}
         </Text>
-        {secondsLeft != null && (
-          <View style={[styles.timerPill, secondsLeft < 60 && styles.timerPillUrgent]}>
-            <Text style={styles.timerText}>
-              ⏱ {String(mins).padStart(2, "0")}:{String(secs).padStart(2, "0")}
-            </Text>
-          </View>
-        )}
+        {deadline != null && <TimerPill deadline={deadline} onExpire={onTimerExpire} />}
       </View>
 
       <ScrollView style={styles.questionArea} contentContainerStyle={{ padding: 20 }}>
@@ -196,30 +244,15 @@ export default function TestTakingScreen() {
 
       {/* Question palette */}
       <ScrollView horizontal style={styles.palette} showsHorizontalScrollIndicator={false}>
-        {questions.map((qq, i) => {
-          const isAnswered = !!answers[qq.id];
-          const isCurrent = i === current;
-          return (
-            <TouchableOpacity
-              key={qq.id}
-              style={[
-                styles.paletteItem,
-                isAnswered && styles.paletteItemAnswered,
-                isCurrent && styles.paletteItemCurrent,
-              ]}
-              onPress={() => setCurrent(i)}
-            >
-              <Text
-                style={[
-                  styles.paletteItemText,
-                  (isAnswered || isCurrent) && styles.paletteItemTextActive,
-                ]}
-              >
-                {i + 1}
-              </Text>
-            </TouchableOpacity>
-          );
-        })}
+        {questions.map((qq, i) => (
+          <PaletteItem
+            key={qq.id}
+            index={i}
+            isAnswered={!!answers[qq.id]}
+            isCurrent={i === current}
+            onPress={() => setCurrent(i)}
+          />
+        ))}
       </ScrollView>
 
       <View style={styles.footer}>

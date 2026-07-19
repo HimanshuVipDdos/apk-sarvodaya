@@ -6,6 +6,7 @@ import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/lib/auth-context";
 import { useIsAdmin } from "@/lib/is-admin";
 import { theme } from "@/lib/theme";
+import { withTimeout } from "@/lib/with-timeout";
 
 type Profile = {
   full_name?: string | null;
@@ -26,15 +27,19 @@ export default function ProfileScreen() {
       let cancelled = false;
       (async () => {
         const userId = session?.user?.id;
-        if (!userId) return;
-        const { data } = await supabase
-          .from("profiles")
-          .select("full_name, phone, class_level, exam_target")
-          .eq("id", userId)
-          .maybeSingle();
-        if (!cancelled) {
-          setProfile(data);
-          setLoading(false);
+        if (!userId) {
+          if (!cancelled) setLoading(false);
+          return;
+        }
+        try {
+          const { data } = await withTimeout(
+            supabase.from("profiles").select("full_name, phone, class_level, exam_target").eq("id", userId).maybeSingle()
+          );
+          if (!cancelled) setProfile(data);
+        } catch (err) {
+          console.warn("[profile] load failed:", err);
+        } finally {
+          if (!cancelled) setLoading(false);
         }
       })();
       return () => {

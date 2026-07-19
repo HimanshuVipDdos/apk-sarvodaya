@@ -1,8 +1,9 @@
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { View, Text, StyleSheet, ScrollView, ActivityIndicator, TouchableOpacity, Linking, Image, Animated } from "react-native";
 import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
 import { supabase } from "@/lib/supabase";
 import { theme } from "@/lib/theme";
+import { withTimeout } from "@/lib/with-timeout";
 
 type LiveClass = { id: string; title: string; is_live: boolean; scheduled_at: string; youtube_url: string | null };
 type Lecture = { id: string; title: string; lecture_number: number | null; youtube_url: string | null };
@@ -25,87 +26,128 @@ function formatInr(n?: number | null) {
 const TABS = ["Live", "Lectures", "Tests", "Notes"] as const;
 type Tab = (typeof TABS)[number];
 
+// Generic state machine for one independent section of the page (one tab's data).
+type SectionState<T> = { loading: boolean; error: string | null; data: T[] };
+const initialSection = <T,>(): SectionState<T> => ({ loading: true, error: null, data: [] });
+
 export default function BatchDetailScreen() {
   const { batchId } = useLocalSearchParams<{ batchId: string }>();
   const router = useRouter();
   const [tab, setTab] = useState<Tab>("Live");
-  const [loading, setLoading] = useState(true);
-  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+
+  const [headerLoading, setHeaderLoading] = useState(true);
+  const [headerError, setHeaderError] = useState<string | null>(null);
   const [batchInfo, setBatchInfo] = useState<BatchInfo | null>(null);
-  const [liveClasses, setLiveClasses] = useState<LiveClass[]>([]);
-  const [lectures, setLectures] = useState<Lecture[]>([]);
-  const [tests, setTests] = useState<CbtTest[]>([]);
-  const [materials, setMaterials] = useState<Material[]>([]);
+
+  const [live, setLive] = useState<SectionState<LiveClass>>(initialSection);
+  const [lectures, setLectures] = useState<SectionState<Lecture>>(initialSection);
+  const [tests, setTests] = useState<SectionState<CbtTest>>(initialSection);
+  const [materials, setMaterials] = useState<SectionState<Material>>(initialSection);
+
   const fadeAnim = useRef(new Animated.Value(0)).current;
+  const mountedRef = useRef(true);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
 
-  const loadData = useCallback(
-    async (cancelledRef: { current: boolean }) => {
-      setLoading(true);
-      setErrorMsg(null);
-      fadeAnim.setValue(0);
+  const loadHeader = useCallback(async () => {
+    setHeaderLoading(true);
+    setHeaderError(null);
+    try {
+      const res = await withTimeout(
+        supabase.from("batches").select("title, thumbnail_url, fees_inr, original_fees_inr, exam_category, duration").eq("id", batchId).maybeSingle()
+      );
+      if (!mountedRef.current) return;
+      if (res.error) throw res.error;
+      setBatchInfo((res.data as any) ?? null);
+    } catch (err: any) {
+      if (!mountedRef.current) return;
+      setHeaderError(err?.message ?? "Couldn't load this batch.");
+    } finally {
+      if (mountedRef.current) setHeaderLoading(false);
+    }
+  }, [batchId]);
 
-      // Best-effort: flips is_live flags server-side. Fire-and-forget so a slow/hanging
-      // RPC can never block the actual page data from loading.
-      supabase.rpc("tick_live_classes").catch(() => {
-        // non-critical — ignore silently
-      });
+  const loadLive = useCallback(async () => {
+    setLive((s) => ({ ...s, loading: true, error: null }));
+    try {
+      const res = await withTimeout(
+        supabase.from("live_classes").select("id,title,is_live,scheduled_at,youtube_url").eq("batch_id", batchId).order("scheduled_at", { ascending: false })
+      );
+      if (!mountedRef.current) return;
+      if (res.error) throw res.error;
+      setLive({ loading: false, error: null, data: (res.data as any) ?? [] });
+    } catch (err: any) {
+      if (!mountedRef.current) return;
+      setLive((s) => ({ ...s, loading: false, error: err?.message ?? "Couldn't load live classes." }));
+    }
+  }, [batchId]);
 
-      try {
-        // Safety net: if any request hangs (bad network, cold Supabase function, etc.)
-        // this guarantees the loading state resolves to an error instead of spinning forever.
-        const withTimeout = <T,>(p: Promise<T>, ms = 15000): Promise<T> =>
-          Promise.race([
-            p,
-            new Promise<T>((_, reject) => setTimeout(() => reject(new Error("Request timed out. Please check your connection and try again.")), ms)),
-          ]);
+  const loadLectures = useCallback(async () => {
+    setLectures((s) => ({ ...s, loading: true, error: null }));
+    try {
+      const res = await withTimeout(
+        supabase.from("lectures").select("id,title,lecture_number,youtube_url").eq("batch_id", batchId).eq("is_published", true).order("lecture_number", { ascending: true })
+      );
+      if (!mountedRef.current) return;
+      if (res.error) throw res.error;
+      setLectures({ loading: false, error: null, data: (res.data as any) ?? [] });
+    } catch (err: any) {
+      if (!mountedRef.current) return;
+      setLectures((s) => ({ ...s, loading: false, error: err?.message ?? "Couldn't load lectures." }));
+    }
+  }, [batchId]);
 
-        const [batchRes, liveRes, lecRes, testRes, matRes] = await withTimeout(
-          Promise.all([
-            supabase.from("batches").select("title, thumbnail_url, fees_inr, original_fees_inr, exam_category, duration").eq("id", batchId).maybeSingle(),
-            supabase.from("live_classes").select("id,title,is_live,scheduled_at,youtube_url").eq("batch_id", batchId).order("scheduled_at", { ascending: false }),
-            supabase.from("lectures").select("id,title,lecture_number,youtube_url").eq("batch_id", batchId).eq("is_published", true).order("lecture_number", { ascending: true }),
-            supabase.from("cbt_tests").select("id,title,duration_minutes").eq("batch_id", batchId).eq("is_published", true),
-            supabase.from("study_materials").select("id,title,file_url,material_type").eq("batch_id", batchId).order("created_at", { ascending: false }),
-          ])
-        );
+  const loadTests = useCallback(async () => {
+    setTests((s) => ({ ...s, loading: true, error: null }));
+    try {
+      const res = await withTimeout(
+        supabase.from("cbt_tests").select("id,title,duration_minutes").eq("batch_id", batchId).eq("is_published", true)
+      );
+      if (!mountedRef.current) return;
+      if (res.error) throw res.error;
+      setTests({ loading: false, error: null, data: (res.data as any) ?? [] });
+    } catch (err: any) {
+      if (!mountedRef.current) return;
+      setTests((s) => ({ ...s, loading: false, error: err?.message ?? "Couldn't load tests." }));
+    }
+  }, [batchId]);
 
-        if (cancelledRef.current) return;
-
-        if (batchRes.error) throw batchRes.error;
-
-        setBatchInfo((batchRes.data as any) ?? null);
-        setLiveClasses((liveRes.data as any) ?? []);
-        setLectures((lecRes.data as any) ?? []);
-        setTests((testRes.data as any) ?? []);
-        setMaterials((matRes.data as any) ?? []);
-        setLoading(false);
-
-        Animated.timing(fadeAnim, {
-          toValue: 1,
-          duration: 320,
-          useNativeDriver: true,
-        }).start();
-      } catch (err: any) {
-        if (cancelledRef.current) return;
-        console.warn("Failed to load batch:", err);
-        setErrorMsg(err?.message ?? "Couldn't load this batch. Check your connection and try again.");
-        setLoading(false);
-      }
-    },
-    [batchId, fadeAnim]
-  );
+  const loadMaterials = useCallback(async () => {
+    setMaterials((s) => ({ ...s, loading: true, error: null }));
+    try {
+      const res = await withTimeout(
+        supabase.from("study_materials").select("id,title,file_url,material_type").eq("batch_id", batchId).order("created_at", { ascending: false })
+      );
+      if (!mountedRef.current) return;
+      if (res.error) throw res.error;
+      setMaterials({ loading: false, error: null, data: (res.data as any) ?? [] });
+    } catch (err: any) {
+      if (!mountedRef.current) return;
+      setMaterials((s) => ({ ...s, loading: false, error: err?.message ?? "Couldn't load notes." }));
+    }
+  }, [batchId]);
 
   useFocusEffect(
     useCallback(() => {
-      const cancelledRef = { current: false };
-      loadData(cancelledRef);
-      return () => {
-        cancelledRef.current = true;
-      };
-    }, [loadData])
+      // Best-effort, fire-and-forget — never blocks anything on this page.
+      supabase.rpc("tick_live_classes").catch(() => {});
+
+      loadHeader();
+      loadLive();
+      loadLectures();
+      loadTests();
+      loadMaterials();
+
+      Animated.timing(fadeAnim, { toValue: 1, duration: 320, useNativeDriver: true }).start();
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [loadHeader, loadLive, loadLectures, loadTests, loadMaterials])
   );
 
-  if (loading) {
+  if (headerLoading) {
     return (
       <View style={styles.center}>
         <ActivityIndicator color="#17358a" />
@@ -113,16 +155,12 @@ export default function BatchDetailScreen() {
     );
   }
 
-  if (errorMsg) {
+  if (headerError) {
     return (
       <View style={styles.center}>
         <Text style={styles.errorTitle}>Something went wrong</Text>
-        <Text style={styles.errorText}>{errorMsg}</Text>
-        <TouchableOpacity
-          style={styles.retryButton}
-          activeOpacity={0.85}
-          onPress={() => loadData({ current: false })}
-        >
+        <Text style={styles.errorText}>{headerError}</Text>
+        <TouchableOpacity style={styles.retryButton} activeOpacity={0.85} onPress={loadHeader}>
           <Text style={styles.retryButtonText}>Retry</Text>
         </TouchableOpacity>
       </View>
@@ -133,16 +171,10 @@ export default function BatchDetailScreen() {
     <Animated.View style={[styles.container, { opacity: fadeAnim }]}>
       <View style={styles.header}>
         {batchInfo?.thumbnail_url ? (
-          <Image
-            source={{ uri: batchInfo.thumbnail_url }}
-            style={[StyleSheet.absoluteFillObject, { opacity: 0.35 }]}
-            resizeMode="cover"
-          />
+          <Image source={{ uri: batchInfo.thumbnail_url }} style={[StyleSheet.absoluteFillObject, { opacity: 0.35 }]} resizeMode="cover" />
         ) : null}
         <View style={styles.headerContent}>
-          {batchInfo?.exam_category ? (
-            <Text style={styles.headerCategory}>{batchInfo.exam_category}</Text>
-          ) : null}
+          {batchInfo?.exam_category ? <Text style={styles.headerCategory}>{batchInfo.exam_category}</Text> : null}
           <Text style={styles.batchTitle} numberOfLines={2}>
             {batchInfo?.title ?? "Batch"}
           </Text>
@@ -169,11 +201,12 @@ export default function BatchDetailScreen() {
       </ScrollView>
 
       <ScrollView contentContainerStyle={{ padding: 16 }}>
-        {tab === "Live" &&
-          (liveClasses.length === 0 ? (
-            <Empty text="No live/recorded classes yet." />
-          ) : (
-            liveClasses.map((lc) => (
+        {tab === "Live" && (
+          <SectionBody
+            state={live}
+            onRetry={loadLive}
+            emptyText="No live/recorded classes yet."
+            renderItem={(lc: LiveClass) => (
               <TouchableOpacity
                 key={lc.id}
                 style={styles.card}
@@ -192,14 +225,16 @@ export default function BatchDetailScreen() {
                   <Text style={styles.playIcon}>▶</Text>
                 )}
               </TouchableOpacity>
-            ))
-          ))}
+            )}
+          />
+        )}
 
-        {tab === "Lectures" &&
-          (lectures.length === 0 ? (
-            <Empty text="No recorded lectures yet." />
-          ) : (
-            lectures.map((l) => (
+        {tab === "Lectures" && (
+          <SectionBody
+            state={lectures}
+            onRetry={loadLectures}
+            emptyText="No recorded lectures yet."
+            renderItem={(l: Lecture) => (
               <TouchableOpacity
                 key={l.id}
                 style={styles.card}
@@ -212,14 +247,16 @@ export default function BatchDetailScreen() {
                 </Text>
                 <Text style={styles.playIcon}>▶</Text>
               </TouchableOpacity>
-            ))
-          ))}
+            )}
+          />
+        )}
 
-        {tab === "Tests" &&
-          (tests.length === 0 ? (
-            <Empty text="No tests for this batch yet." />
-          ) : (
-            tests.map((t) => (
+        {tab === "Tests" && (
+          <SectionBody
+            state={tests}
+            onRetry={loadTests}
+            emptyText="No tests for this batch yet."
+            renderItem={(t: CbtTest) => (
               <TouchableOpacity
                 key={t.id}
                 style={styles.card}
@@ -229,31 +266,65 @@ export default function BatchDetailScreen() {
                 <Text style={styles.cardTitle}>{t.title}</Text>
                 {t.duration_minutes ? <Text style={styles.cardMeta}>⏱ {t.duration_minutes} min</Text> : null}
               </TouchableOpacity>
-            ))
-          ))}
+            )}
+          />
+        )}
 
-        {tab === "Notes" &&
-          (materials.length === 0 ? (
-            <Empty text="No notes/DPPs uploaded yet." />
-          ) : (
-            materials.map((m) => (
-              <TouchableOpacity
-                key={m.id}
-                style={styles.card}
-                activeOpacity={0.8}
-                onPress={() => m.file_url && Linking.openURL(m.file_url)}
-              >
+        {tab === "Notes" && (
+          <SectionBody
+            state={materials}
+            onRetry={loadMaterials}
+            emptyText="No notes/DPPs uploaded yet."
+            renderItem={(m: Material) => (
+              <TouchableOpacity key={m.id} style={styles.card} activeOpacity={0.8} onPress={() => m.file_url && Linking.openURL(m.file_url)}>
                 <Text style={styles.pdfIcon}>📄</Text>
                 <View style={{ flex: 1, marginLeft: 10 }}>
                   <Text style={styles.cardTitle}>{m.title}</Text>
                   <Text style={styles.cardMeta}>Tap to open {(m.material_type ?? "pdf").toUpperCase()}</Text>
                 </View>
               </TouchableOpacity>
-            ))
-          ))}
+            )}
+          />
+        )}
       </ScrollView>
     </Animated.View>
   );
+}
+
+// Shared "loading / error+retry / empty / list" rendering for one tab's data,
+// completely independent from the other tabs and from the header above.
+function SectionBody<T>({
+  state,
+  onRetry,
+  emptyText,
+  renderItem,
+}: {
+  state: SectionState<T>;
+  onRetry: () => void;
+  emptyText: string;
+  renderItem: (item: T) => ReactNode;
+}) {
+  if (state.loading) {
+    return (
+      <View style={{ paddingVertical: 30, alignItems: "center" }}>
+        <ActivityIndicator color="#17358a" />
+      </View>
+    );
+  }
+  if (state.error) {
+    return (
+      <View style={styles.emptyCard}>
+        <Text style={styles.emptyText}>{state.error}</Text>
+        <TouchableOpacity style={[styles.retryButton, { marginTop: 10 }]} activeOpacity={0.85} onPress={onRetry}>
+          <Text style={styles.retryButtonText}>Retry</Text>
+        </TouchableOpacity>
+      </View>
+    );
+  }
+  if (state.data.length === 0) {
+    return <Empty text={emptyText} />;
+  }
+  return <>{state.data.map(renderItem)}</>;
 }
 
 function Empty({ text }: { text: string }) {
@@ -301,5 +372,5 @@ const styles = StyleSheet.create({
   playIcon: { fontSize: 16, color: "#17358a" },
   pdfIcon: { fontSize: 20 },
   emptyCard: { alignItems: "center", padding: 30 },
-  emptyText: { color: "#9ba0bd", fontSize: 13 },
+  emptyText: { color: "#9ba0bd", fontSize: 13, textAlign: "center" },
 });
