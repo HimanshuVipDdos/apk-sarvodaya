@@ -1,158 +1,10 @@
-import { useEffect, useMemo, useRef, useState } from "react";
-import {
-  View,
-  Text,
-  StyleSheet,
-  ScrollView,
-  ActivityIndicator,
-  Animated,
-  Easing,
-  Pressable,
-} from "react-native";
+import { useEffect, useMemo, useState } from "react";
+import { View, Text, StyleSheet, ScrollView, ActivityIndicator, Animated } from "react-native";
 import { useLocalSearchParams, useRouter } from "expo-router";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { getCbtAttemptResult, type ResultResponse } from "@/lib/cbt-api";
 import { theme } from "@/lib/theme";
-
-// ---------------------------------------------------------------------------
-// A number that animates from 0 up to `value` once, using an Animated.Value
-// driven listener. Cheap: one listener per number, no re-render storms.
-// ---------------------------------------------------------------------------
-function CountUpText({
-  value,
-  suffix = "",
-  decimals = 0,
-  style,
-  delay = 0,
-  duration = 700,
-}: {
-  value: number;
-  suffix?: string;
-  decimals?: number;
-  style?: any;
-  delay?: number;
-  duration?: number;
-}) {
-  const [display, setDisplay] = useState("0" + suffix);
-  const anim = useRef(new Animated.Value(0)).current;
-
-  useEffect(() => {
-    const id = anim.addListener(({ value: v }) => {
-      setDisplay(`${v.toFixed(decimals)}${suffix}`);
-    });
-    Animated.timing(anim, {
-      toValue: value,
-      duration,
-      delay,
-      easing: Easing.out(Easing.cubic),
-      useNativeDriver: false, // driving a JS listener, not a native prop
-    }).start();
-    return () => anim.removeListener(id);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [value]);
-
-  return <Text style={style}>{display}</Text>;
-}
-
-// A card that fades + rises into place. Pure transform/opacity => native
-// driver => smooth even while the rest of the screen is still loading data.
-function RiseIn({
-  children,
-  delay = 0,
-  style,
-}: {
-  children: React.ReactNode;
-  delay?: number;
-  style?: any;
-}) {
-  const anim = useRef(new Animated.Value(0)).current;
-  useEffect(() => {
-    Animated.timing(anim, {
-      toValue: 1,
-      duration: 480,
-      delay,
-      easing: Easing.out(Easing.cubic),
-      useNativeDriver: true,
-    }).start();
-  }, [anim, delay]);
-
-  return (
-    <Animated.View
-      style={[
-        style,
-        {
-          opacity: anim,
-          transform: [
-            { translateY: anim.interpolate({ inputRange: [0, 1], outputRange: [18, 0] }) },
-          ],
-        },
-      ]}
-    >
-      {children}
-    </Animated.View>
-  );
-}
-
-// Button with a tactile press-scale — replaces flat TouchableOpacity taps
-// with something that feels alive without any extra dependency.
-function PressScale({
-  children,
-  style,
-  onPress,
-}: {
-  children: React.ReactNode;
-  style?: any;
-  onPress?: () => void;
-}) {
-  const scale = useRef(new Animated.Value(1)).current;
-  const pressIn = () =>
-    Animated.spring(scale, { toValue: 0.96, useNativeDriver: true, speed: 40, bounciness: 6 }).start();
-  const pressOut = () =>
-    Animated.spring(scale, { toValue: 1, useNativeDriver: true, speed: 40, bounciness: 6 }).start();
-  return (
-    <Pressable onPressIn={pressIn} onPressOut={pressOut} onPress={onPress}>
-      <Animated.View style={[style, { transform: [{ scale }] }]}>{children}</Animated.View>
-    </Pressable>
-  );
-}
-
-// Animated horizontal fill bar (used for the score meter and topic rows).
-function FillBar({
-  percent,
-  color,
-  trackColor = "#e6e9f5",
-  height = 8,
-  delay = 0,
-}: {
-  percent: number;
-  color: string;
-  trackColor?: string;
-  height?: number;
-  delay?: number;
-}) {
-  const anim = useRef(new Animated.Value(0)).current;
-  useEffect(() => {
-    Animated.timing(anim, {
-      toValue: Math.max(0, Math.min(100, percent)),
-      duration: 900,
-      delay,
-      easing: Easing.out(Easing.cubic),
-      useNativeDriver: false,
-    }).start();
-  }, [anim, percent, delay]);
-
-  return (
-    <View style={[styles.trackBase, { height, backgroundColor: trackColor, borderRadius: height }]}>
-      <Animated.View
-        style={{
-          height,
-          borderRadius: height,
-          backgroundColor: color,
-          width: anim.interpolate({ inputRange: [0, 100], outputRange: ["0%", "100%"] }),
-        }}
-      />
-    </View>
-  );
-}
+import { RiseIn, PressScale, FillBar, CountUpText, usePulse } from "@/components/Motion";
 
 function gradeFor(percent: number): { label: string; color: string; emoji: string } {
   if (percent >= 90) return { label: "Outstanding", color: "#15803d", emoji: "🏆" };
@@ -165,24 +17,16 @@ function gradeFor(percent: number): { label: string; color: string; emoji: strin
 export default function ResultScreen() {
   const { attemptId } = useLocalSearchParams<{ attemptId: string }>();
   const router = useRouter();
+  const insets = useSafeAreaInsets();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [data, setData] = useState<ResultResponse | null>(null);
 
-  // Loading skeleton pulse
-  const pulse = useRef(new Animated.Value(0.4)).current;
-  useEffect(() => {
-    const loop = Animated.loop(
-      Animated.sequence([
-        Animated.timing(pulse, { toValue: 1, duration: 650, easing: Easing.inOut(Easing.ease), useNativeDriver: true }),
-        Animated.timing(pulse, { toValue: 0.4, duration: 650, easing: Easing.inOut(Easing.ease), useNativeDriver: true }),
-      ])
-    );
-    if (loading) loop.start();
-    return () => loop.stop();
-  }, [loading, pulse]);
+  const pulse = usePulse(loading);
 
-  useEffect(() => {
+  function load() {
+    setLoading(true);
+    setError(null);
     let cancelled = false;
     getCbtAttemptResult(attemptId)
       .then((res) => !cancelled && setData(res))
@@ -191,6 +35,11 @@ export default function ResultScreen() {
     return () => {
       cancelled = true;
     };
+  }
+
+  useEffect(() => {
+    return load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [attemptId]);
 
   const percent = useMemo(() => {
@@ -200,6 +49,21 @@ export default function ResultScreen() {
   }, [data]);
 
   const grade = useMemo(() => gradeFor(percent), [percent]);
+
+  // Weakest topics first — that's the part of this screen students actually
+  // need to act on, so it shouldn't be buried in whatever order the API
+  // happened to return the object's keys in.
+  const sortedTopics = useMemo(() => {
+    const breakdown = data?.attempt.topic_breakdown;
+    if (!breakdown) return [];
+    return Object.entries(breakdown)
+      .map(([topic, stats]) => {
+        const total = stats.correct + stats.wrong + stats.unanswered;
+        const acc = total > 0 ? Math.round((stats.correct / total) * 100) : 0;
+        return { topic, stats, acc };
+      })
+      .sort((a, b) => a.acc - b.acc);
+  }, [data]);
 
   if (loading) {
     return (
@@ -221,9 +85,14 @@ export default function ResultScreen() {
       <View style={styles.center}>
         <Text style={styles.errorEmoji}>⚠️</Text>
         <Text style={styles.errorText}>{error ?? "Result not found."}</Text>
-        <PressScale style={styles.retryBtn} onPress={() => router.replace("/(tabs)/dashboard")}>
-          <Text style={styles.retryBtnText}>Back to Dashboard</Text>
-        </PressScale>
+        <View style={{ flexDirection: "row", gap: 10 }}>
+          <PressScale style={styles.retryBtnOutline} onPress={load}>
+            <Text style={styles.retryBtnOutlineText}>Try Again</Text>
+          </PressScale>
+          <PressScale style={styles.retryBtn} onPress={() => router.replace("/(tabs)/dashboard")}>
+            <Text style={styles.retryBtnText}>Back to Dashboard</Text>
+          </PressScale>
+        </View>
       </View>
     );
   }
@@ -235,7 +104,7 @@ export default function ResultScreen() {
   return (
     <ScrollView style={styles.container} contentContainerStyle={{ paddingBottom: 30 }} showsVerticalScrollIndicator={false}>
       {/* Hero */}
-      <View style={styles.hero}>
+      <View style={[styles.hero, { paddingTop: insets.top + 20 }]}>
         <View style={styles.heroBlobA} />
         <View style={styles.heroBlobB} />
 
@@ -305,32 +174,29 @@ export default function ResultScreen() {
         </RiseIn>
       </View>
 
-      {/* Topic breakdown */}
-      {a.topic_breakdown && Object.keys(a.topic_breakdown).length > 0 && (
+      {/* Topic breakdown — weakest first */}
+      {sortedTopics.length > 0 && (
         <RiseIn delay={340} style={styles.topicCard}>
           <Text style={styles.topicHeading}>Topic-wise Analysis</Text>
-          {Object.entries(a.topic_breakdown).map(([topic, stats], i) => {
-            const total = stats.correct + stats.wrong + stats.unanswered;
-            const acc = total > 0 ? Math.round((stats.correct / total) * 100) : 0;
-            return (
-              <View key={topic} style={styles.topicRow}>
-                <View style={styles.topicRowTop}>
-                  <Text style={styles.topicName} numberOfLines={1}>
-                    {topic}
-                  </Text>
-                  <Text style={styles.topicAcc}>{acc}%</Text>
-                </View>
-                <FillBar
-                  percent={acc}
-                  color={acc >= 60 ? "#16a34a" : acc >= 35 ? theme.gold : theme.dangerText}
-                  delay={380 + i * 60}
-                />
-                <Text style={styles.topicMeta}>
-                  ✅ {stats.correct}  ❌ {stats.wrong}  ⬜ {stats.unanswered}
+          <Text style={styles.topicSubheading}>Weakest topics first — start here</Text>
+          {sortedTopics.map(({ topic, stats, acc }, i) => (
+            <View key={topic} style={styles.topicRow}>
+              <View style={styles.topicRowTop}>
+                <Text style={styles.topicName} numberOfLines={1}>
+                  {topic}
                 </Text>
+                <Text style={styles.topicAcc}>{acc}%</Text>
               </View>
-            );
-          })}
+              <FillBar
+                percent={acc}
+                color={acc >= 60 ? "#16a34a" : acc >= 35 ? theme.gold : theme.dangerText}
+                delay={380 + i * 60}
+              />
+              <Text style={styles.topicMeta}>
+                ✅ {stats.correct}  ❌ {stats.wrong}  ⬜ {stats.unanswered}
+              </Text>
+            </View>
+          ))}
         </RiseIn>
       )}
 
@@ -368,6 +234,15 @@ const styles = StyleSheet.create({
   errorText: { color: theme.textSecondary, textAlign: "center", marginBottom: 18 },
   retryBtn: { backgroundColor: theme.navy, borderRadius: 14, paddingHorizontal: 22, paddingVertical: 12 },
   retryBtnText: { color: "#fff", fontWeight: "700" },
+  retryBtnOutline: {
+    backgroundColor: "#fff",
+    borderWidth: 1.5,
+    borderColor: theme.navy,
+    borderRadius: 14,
+    paddingHorizontal: 22,
+    paddingVertical: 12,
+  },
+  retryBtnOutlineText: { color: theme.navy, fontWeight: "700" },
 
   heroSkeleton: {
     height: 260,
@@ -379,7 +254,6 @@ const styles = StyleSheet.create({
 
   hero: {
     backgroundColor: theme.navy,
-    paddingTop: 56,
     paddingBottom: 26,
     paddingHorizontal: 20,
     borderBottomLeftRadius: 28,
@@ -490,13 +364,13 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: theme.border,
   },
-  topicHeading: { fontSize: 14, fontWeight: "700", color: theme.textPrimary, marginBottom: 14 },
+  topicHeading: { fontSize: 14, fontWeight: "700", color: theme.textPrimary },
+  topicSubheading: { fontSize: 11, color: theme.textMuted, marginTop: 2, marginBottom: 14 },
   topicRow: { marginBottom: 14 },
   topicRowTop: { flexDirection: "row", justifyContent: "space-between", marginBottom: 6 },
   topicName: { fontSize: 12.5, fontWeight: "600", color: theme.textPrimary, flex: 1, marginRight: 8 },
   topicAcc: { fontSize: 12, fontWeight: "700", color: theme.textSecondary },
   topicMeta: { fontSize: 11, color: theme.textMuted, marginTop: 6 },
-  trackBase: { width: "100%", overflow: "hidden" },
 
   mistakesButton: {
     backgroundColor: "#fff",
