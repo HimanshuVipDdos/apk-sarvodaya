@@ -1,4 +1,3 @@
-<<<<<<< HEAD
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   View,
@@ -10,15 +9,9 @@ import {
   Easing,
   Pressable,
 } from "react-native";
-=======
-import { useEffect, useMemo, useState } from "react";
-import { View, Text, StyleSheet, ScrollView, ActivityIndicator } from "react-native";
->>>>>>> 64b78bcb61afa4153aa13eaf0deeaeb5a79bd3f6
 import { useLocalSearchParams, useRouter } from "expo-router";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { getCbtAttemptResult, type ResultResponse } from "@/lib/cbt-api";
 import { theme } from "@/lib/theme";
-<<<<<<< HEAD
 
 // ---------------------------------------------------------------------------
 // A number that animates from 0 up to `value` once, using an Animated.Value
@@ -160,9 +153,6 @@ function FillBar({
     </View>
   );
 }
-=======
-import { RiseIn, PressScale, FillBar, CountUpText, usePulse } from "@/components/Motion";
->>>>>>> 64b78bcb61afa4153aa13eaf0deeaeb5a79bd3f6
 
 function gradeFor(percent: number): { label: string; color: string; emoji: string } {
   if (percent >= 90) return { label: "Outstanding", color: "#15803d", emoji: "🏆" };
@@ -175,12 +165,10 @@ function gradeFor(percent: number): { label: string; color: string; emoji: strin
 export default function ResultScreen() {
   const { attemptId } = useLocalSearchParams<{ attemptId: string }>();
   const router = useRouter();
-  const insets = useSafeAreaInsets();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [data, setData] = useState<ResultResponse | null>(null);
 
-<<<<<<< HEAD
   // Loading skeleton pulse
   const pulse = useRef(new Animated.Value(0.4)).current;
   useEffect(() => {
@@ -195,13 +183,6 @@ export default function ResultScreen() {
   }, [loading, pulse]);
 
   useEffect(() => {
-=======
-  const pulse = usePulse(loading);
-
-  function load() {
-    setLoading(true);
-    setError(null);
->>>>>>> 64b78bcb61afa4153aa13eaf0deeaeb5a79bd3f6
     let cancelled = false;
     getCbtAttemptResult(attemptId)
       .then((res) => !cancelled && setData(res))
@@ -210,11 +191,6 @@ export default function ResultScreen() {
     return () => {
       cancelled = true;
     };
-  }
-
-  useEffect(() => {
-    return load();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [attemptId]);
 
   const percent = useMemo(() => {
@@ -225,24 +201,6 @@ export default function ResultScreen() {
 
   const grade = useMemo(() => gradeFor(percent), [percent]);
 
-<<<<<<< HEAD
-=======
-  // Weakest topics first — that's the part of this screen students actually
-  // need to act on, so it shouldn't be buried in whatever order the API
-  // happened to return the object's keys in.
-  const sortedTopics = useMemo(() => {
-    const breakdown = data?.attempt.topic_breakdown;
-    if (!breakdown) return [];
-    return Object.entries(breakdown)
-      .map(([topic, stats]) => {
-        const total = stats.correct + stats.wrong + stats.unanswered;
-        const acc = total > 0 ? Math.round((stats.correct / total) * 100) : 0;
-        return { topic, stats, acc };
-      })
-      .sort((a, b) => a.acc - b.acc);
-  }, [data]);
-
->>>>>>> 64b78bcb61afa4153aa13eaf0deeaeb5a79bd3f6
   if (loading) {
     return (
       <View style={styles.container}>
@@ -251,11 +209,7 @@ export default function ResultScreen() {
         </View>
         <View style={{ padding: 20, gap: 12 }}>
           {[0, 1, 2].map((i) => (
-<<<<<<< HEAD
             <Animated.View key={i} style={[styles.skeletonBlock, { opacity: pulse }]} />
-=======
-            <Animated_SkelBlock key={i} pulse={pulse} />
->>>>>>> 64b78bcb61afa4153aa13eaf0deeaeb5a79bd3f6
           ))}
         </View>
       </View>
@@ -267,20 +221,9 @@ export default function ResultScreen() {
       <View style={styles.center}>
         <Text style={styles.errorEmoji}>⚠️</Text>
         <Text style={styles.errorText}>{error ?? "Result not found."}</Text>
-<<<<<<< HEAD
         <PressScale style={styles.retryBtn} onPress={() => router.replace("/(tabs)/dashboard")}>
           <Text style={styles.retryBtnText}>Back to Dashboard</Text>
         </PressScale>
-=======
-        <View style={{ flexDirection: "row", gap: 10 }}>
-          <PressScale style={styles.retryBtnOutline} onPress={load}>
-            <Text style={styles.retryBtnOutlineText}>Try Again</Text>
-          </PressScale>
-          <PressScale style={styles.retryBtn} onPress={() => router.replace("/(tabs)/dashboard")}>
-            <Text style={styles.retryBtnText}>Back to Dashboard</Text>
-          </PressScale>
-        </View>
->>>>>>> 64b78bcb61afa4153aa13eaf0deeaeb5a79bd3f6
       </View>
     );
   }
@@ -292,11 +235,7 @@ export default function ResultScreen() {
   return (
     <ScrollView style={styles.container} contentContainerStyle={{ paddingBottom: 30 }} showsVerticalScrollIndicator={false}>
       {/* Hero */}
-<<<<<<< HEAD
       <View style={styles.hero}>
-=======
-      <View style={[styles.hero, { paddingTop: insets.top + 20 }]}>
->>>>>>> 64b78bcb61afa4153aa13eaf0deeaeb5a79bd3f6
         <View style={styles.heroBlobA} />
         <View style={styles.heroBlobB} />
 
@@ -305,7 +244,6 @@ export default function ResultScreen() {
             <Text style={{ fontSize: 13 }}>{grade.emoji}</Text>
             <Text style={[styles.gradeBadgeText, { color: grade.color }]}>{grade.label}</Text>
           </View>
-<<<<<<< HEAD
 
           <Text style={styles.testTitle} numberOfLines={2}>
             {a.test.title}
@@ -393,92 +331,6 @@ export default function ResultScreen() {
               </View>
             );
           })}
-=======
-
-          <Text style={styles.testTitle} numberOfLines={2}>
-            {a.test.title}
-          </Text>
-
-          <View style={styles.scoreCircleWrap}>
-            <View style={styles.scoreCircleTrack} />
-            <View style={styles.scoreCircle}>
-              <CountUpText value={percent} suffix="%" style={styles.scorePercentText} duration={900} />
-              <Text style={styles.scoreSubText}>score</Text>
-            </View>
-          </View>
-
-          <View style={{ width: "78%", marginTop: 16 }}>
-            <FillBar percent={percent} color={theme.goldLight} trackColor="rgba(255,255,255,0.18)" height={7} delay={250} />
-          </View>
-
-          <View style={styles.marksRow}>
-            <CountUpText
-              value={a.score}
-              decimals={Number.isInteger(a.score) ? 0 : 1}
-              style={styles.marksText}
-              duration={800}
-            />
-            <Text style={styles.marksOfText}> / {a.max_score} marks</Text>
-          </View>
-        </RiseIn>
-      </View>
-
-      {/* Rank card */}
-      <RiseIn delay={120} style={styles.rankCard}>
-        <View style={styles.rankLeft}>
-          <Text style={styles.rankMedal}>{medal ?? "📊"}</Text>
-          <View>
-            <Text style={styles.rankLabel}>Your Rank</Text>
-            <Text style={[styles.rankValue, isTop3 && { color: theme.gold }]}>
-              #{data.rank} <Text style={styles.rankOf}>of {data.total_participants}</Text>
-            </Text>
-          </View>
-        </View>
-        <PressScale
-          style={styles.leaderboardChip}
-          onPress={() => router.push({ pathname: "/leaderboard/[testId]", params: { testId: a.test_id } })}
-        >
-          <Text style={styles.leaderboardChipText}>Leaderboard →</Text>
-        </PressScale>
-      </RiseIn>
-
-      {/* Stats grid */}
-      <View style={styles.statsRow}>
-        <RiseIn delay={180} style={{ flex: 1 }}>
-          <StatCard label="Correct" value={a.correct_count} color="#16a34a" bg="#f0fdf4" icon="✅" />
-        </RiseIn>
-        <RiseIn delay={230} style={{ flex: 1 }}>
-          <StatCard label="Wrong" value={a.wrong_count} color="#dc2626" bg="#fef2f2" icon="❌" />
-        </RiseIn>
-        <RiseIn delay={280} style={{ flex: 1 }}>
-          <StatCard label="Skipped" value={a.unanswered_count} color="#5b6280" bg="#f4f5fa" icon="⬜" />
-        </RiseIn>
-      </View>
-
-      {/* Topic breakdown — weakest first */}
-      {sortedTopics.length > 0 && (
-        <RiseIn delay={340} style={styles.topicCard}>
-          <Text style={styles.topicHeading}>Topic-wise Analysis</Text>
-          <Text style={styles.topicSubheading}>Weakest topics first — start here</Text>
-          {sortedTopics.map(({ topic, stats, acc }, i) => (
-            <View key={topic} style={styles.topicRow}>
-              <View style={styles.topicRowTop}>
-                <Text style={styles.topicName} numberOfLines={1}>
-                  {topic}
-                </Text>
-                <Text style={styles.topicAcc}>{acc}%</Text>
-              </View>
-              <FillBar
-                percent={acc}
-                color={acc >= 60 ? "#16a34a" : acc >= 35 ? theme.gold : theme.dangerText}
-                delay={380 + i * 60}
-              />
-              <Text style={styles.topicMeta}>
-                ✅ {stats.correct}  ❌ {stats.wrong}  ⬜ {stats.unanswered}
-              </Text>
-            </View>
-          ))}
->>>>>>> 64b78bcb61afa4153aa13eaf0deeaeb5a79bd3f6
         </RiseIn>
       )}
 
@@ -509,13 +361,6 @@ function StatCard({ label, value, color, bg, icon }: { label: string; value: num
   );
 }
 
-// Tiny wrapper so the skeleton blocks can consume the shared `usePulse`
-// value without pulling in Animated directly in this file.
-function Animated_SkelBlock({ pulse }: { pulse: any }) {
-  const { Animated: RNAnimated } = require("react-native");
-  return <RNAnimated.View style={[styles.skeletonBlock, { opacity: pulse }]} />;
-}
-
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: theme.cream },
   center: { flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: theme.cream, padding: 30 },
@@ -523,18 +368,6 @@ const styles = StyleSheet.create({
   errorText: { color: theme.textSecondary, textAlign: "center", marginBottom: 18 },
   retryBtn: { backgroundColor: theme.navy, borderRadius: 14, paddingHorizontal: 22, paddingVertical: 12 },
   retryBtnText: { color: "#fff", fontWeight: "700" },
-<<<<<<< HEAD
-=======
-  retryBtnOutline: {
-    backgroundColor: "#fff",
-    borderWidth: 1.5,
-    borderColor: theme.navy,
-    borderRadius: 14,
-    paddingHorizontal: 22,
-    paddingVertical: 12,
-  },
-  retryBtnOutlineText: { color: theme.navy, fontWeight: "700" },
->>>>>>> 64b78bcb61afa4153aa13eaf0deeaeb5a79bd3f6
 
   heroSkeleton: {
     height: 260,
@@ -546,10 +379,7 @@ const styles = StyleSheet.create({
 
   hero: {
     backgroundColor: theme.navy,
-<<<<<<< HEAD
     paddingTop: 56,
-=======
->>>>>>> 64b78bcb61afa4153aa13eaf0deeaeb5a79bd3f6
     paddingBottom: 26,
     paddingHorizontal: 20,
     borderBottomLeftRadius: 28,
@@ -660,21 +490,13 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: theme.border,
   },
-<<<<<<< HEAD
   topicHeading: { fontSize: 14, fontWeight: "700", color: theme.textPrimary, marginBottom: 14 },
-=======
-  topicHeading: { fontSize: 14, fontWeight: "700", color: theme.textPrimary },
-  topicSubheading: { fontSize: 11, color: theme.textMuted, marginTop: 2, marginBottom: 14 },
->>>>>>> 64b78bcb61afa4153aa13eaf0deeaeb5a79bd3f6
   topicRow: { marginBottom: 14 },
   topicRowTop: { flexDirection: "row", justifyContent: "space-between", marginBottom: 6 },
   topicName: { fontSize: 12.5, fontWeight: "600", color: theme.textPrimary, flex: 1, marginRight: 8 },
   topicAcc: { fontSize: 12, fontWeight: "700", color: theme.textSecondary },
   topicMeta: { fontSize: 11, color: theme.textMuted, marginTop: 6 },
-<<<<<<< HEAD
   trackBase: { width: "100%", overflow: "hidden" },
-=======
->>>>>>> 64b78bcb61afa4153aa13eaf0deeaeb5a79bd3f6
 
   mistakesButton: {
     backgroundColor: "#fff",
