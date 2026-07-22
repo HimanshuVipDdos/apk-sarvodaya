@@ -18,6 +18,7 @@ import { WebView, type WebViewNavigation } from "react-native-webview";
 import { Ionicons } from "@expo/vector-icons";
 import { supabase } from "@/lib/supabase";
 import { theme } from "@/lib/theme";
+import { withTimeout } from "@/lib/with-timeout";
 import { useLiveChat } from "@/lib/live-chat";
 import { extractYouTubeId, buildYouTubeEmbedHtml, describeYouTubeError } from "@/lib/youtube";
 
@@ -88,23 +89,33 @@ export default function LiveClassScreen() {
     // from 0 every single time. Metadata (title / is_live badge) still
     // refreshes quietly in the background.
     if (!hasLoadedOnce.current) setLoading(true);
-    const { data, error } = await supabase
-      .from("live_classes")
-      .select("id,title,is_live,youtube_url,batch_id")
-      .eq("id", liveClassId)
-      .maybeSingle();
+    try {
+      const { data, error } = await withTimeout(
+        supabase
+          .from("live_classes")
+          .select("id,title,is_live,youtube_url,batch_id")
+          .eq("id", liveClassId)
+          .maybeSingle()
+      );
 
-    if (error) {
-      console.warn("[live] load failed:", error.message);
-      // Never blow away a live class that's already playing just because a
-      // background metadata refresh hiccuped — only surface the error
-      // screen if we have nothing on screen yet.
-      if (!liveClass) setErrorMsg(error.message);
-    } else if (!data) {
-      if (!liveClass) setErrorMsg("This class could not be found.");
-    } else {
-      setLiveClass(data as any);
-      setErrorMsg(null);
+      if (error) {
+        console.warn("[live] load failed:", error.message);
+        // Never blow away a live class that's already playing just because a
+        // background metadata refresh hiccuped — only surface the error
+        // screen if we have nothing on screen yet.
+        if (!liveClass) setErrorMsg(error.message);
+      } else if (!data) {
+        if (!liveClass) setErrorMsg("This class could not be found.");
+      } else {
+        setLiveClass(data as any);
+        setErrorMsg(null);
+      }
+    } catch (err: any) {
+      // withTimeout rejects here if the request hangs — without this, a slow
+      // or dropped connection would leave the loading spinner running
+      // forever with no way for the student to tell "is it working or not".
+      console.warn("[live] load failed:", err);
+      if (!liveClass) setErrorMsg(err?.message ?? "Couldn't load this class.");
     }
     setLoading(false);
     hasLoadedOnce.current = true;
