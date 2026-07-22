@@ -1,6 +1,8 @@
-import { useCallback, useEffect, useState } from "react";
-import { View, Text, StyleSheet, ActivityIndicator, TouchableOpacity, Platform, Dimensions, Linking } from "react-native";
+import { useCallback, useRef, useState } from "react";
+import { View, Text, StyleSheet, ActivityIndicator, TouchableOpacity, Dimensions } from "react-native";
 import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
+import { StatusBar } from "expo-status-bar";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { WebView, type WebViewNavigation } from "react-native-webview";
 import { Ionicons } from "@expo/vector-icons";
 import { supabase } from "@/lib/supabase";
@@ -21,45 +23,46 @@ function isAllowedNavigation(url: string) {
 export default function LectureScreen() {
   const { lectureId } = useLocalSearchParams<{ lectureId: string }>();
   const router = useRouter();
+  const insets = useSafeAreaInsets();
   const [loading, setLoading] = useState(true);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [lecture, setLecture] = useState<LectureInfo | null>(null);
-  const [playerUnavailable, setPlayerUnavailable] = useState(false);
+  const hasLoadedOnce = useRef(false);
 
   const load = useCallback(async () => {
     if (!lectureId) return;
-    setLoading(true);
-    setErrorMsg(null);
+    // First load only shows the spinner. Every later call — which happens
+    // on every focus regain, e.g. the student switches apps and comes back —
+    // must not flip `loading` back to true. Doing so would swap out this
+    // whole screen including the WebView, restarting the video from 0 on
+    // every single app foreground.
+    if (!hasLoadedOnce.current) setLoading(true);
     const { data, error } = await supabase
       .from("lectures")
       .select("id,title,youtube_url")
       .eq("id", lectureId)
       .maybeSingle();
 
-    if (error) setErrorMsg(error.message);
-    else if (!data) setErrorMsg("This lecture could not be found.");
-    else setLecture(data as any);
+    if (error) {
+      console.warn("[lecture] load failed:", error.message);
+      // Never blow away an already-playing lecture over a background refresh hiccup.
+      if (!lecture) setErrorMsg(error.message);
+    } else if (!data) {
+      if (!lecture) setErrorMsg("This lecture could not be found.");
+    } else {
+      setLecture(data as any);
+      setErrorMsg(null);
+    }
     setLoading(false);
-  }, [lectureId]);
+    hasLoadedOnce.current = true;
+  }, [lectureId, lecture]);
 
   useFocusEffect(
     useCallback(() => {
       load();
-    }, [load])
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [lectureId])
   );
-
-  useEffect(() => {
-    setPlayerUnavailable(false);
-  }, [lecture?.youtube_url]);
-
-  function onWebViewMessage(event: { nativeEvent: { data: string } }) {
-    try {
-      const msg = JSON.parse(event.nativeEvent.data);
-      if (msg.type === "unavailable") setPlayerUnavailable(true);
-    } catch {
-      // ignore malformed messages
-    }
-  }
 
   if (loading) {
     return (
@@ -84,7 +87,11 @@ export default function LectureScreen() {
 
   return (
     <View style={{ flex: 1, backgroundColor: "#000" }}>
-      <View style={styles.topBar}>
+      {/* Full black background here — status bar icons need to be light,
+          regardless of the app-wide "dark" default set in the root layout. */}
+      <StatusBar style="light" />
+
+      <View style={[styles.topBar, { paddingTop: insets.top + 10 }]}>
         <TouchableOpacity onPress={() => router.back()} hitSlop={10}>
           <Ionicons name="chevron-back" size={24} color="#fff" />
         </TouchableOpacity>
@@ -94,14 +101,11 @@ export default function LectureScreen() {
         <View style={{ width: 24 }} />
       </View>
 
-      {videoId && !playerUnavailable ? (
+      {videoId ? (
         <View style={{ width: SCREEN_W, height: PLAYER_HEIGHT, backgroundColor: "#000" }}>
           <WebView
-            key={videoId}
             source={{ html: buildYouTubeEmbedHtml(videoId), baseUrl: "https://www.youtube.com" }}
-            onMessage={onWebViewMessage}
             onShouldStartLoadWithRequest={(req: WebViewNavigation) => isAllowedNavigation(req.url)}
-            onHttpError={() => setPlayerUnavailable(true)}
             allowsFullscreenVideo
             allowsInlineMediaPlayback
             mediaPlaybackRequiresUserAction={false}
@@ -113,20 +117,7 @@ export default function LectureScreen() {
         </View>
       ) : (
         <View style={[styles.center, { height: PLAYER_HEIGHT }]}>
-          <Ionicons name="videocam-off-outline" size={28} color="#9aa3c7" style={{ marginBottom: 10 }} />
-          <Text style={styles.errorText}>
-            {videoId
-              ? "This video can't be played inside the app right now."
-              : "Video link not available for this lecture."}
-          </Text>
-          {videoId ? (
-            <TouchableOpacity
-              style={styles.backBtn}
-              onPress={() => Linking.openURL(lecture.youtube_url ?? `https://www.youtube.com/watch?v=${videoId}`)}
-            >
-              <Text style={styles.backBtnText}>Watch on YouTube</Text>
-            </TouchableOpacity>
-          ) : null}
+          <Text style={styles.errorText}>Video link not available for this lecture.</Text>
         </View>
       )}
 
@@ -144,7 +135,6 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     gap: 10,
-    paddingTop: Platform.OS === "ios" ? 50 : 14,
     paddingBottom: 12,
     paddingHorizontal: 14,
     backgroundColor: "#000",
