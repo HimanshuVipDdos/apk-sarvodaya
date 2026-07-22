@@ -96,7 +96,7 @@ export function buildYouTubeEmbedHtml(videoId: string, opts?: { autoplay?: boole
           fs: 1,
           iv_load_policy: 3,
           controls: 1,
-          origin: 'https://www.youtube.com'
+          origin: 'https://sarvodayadhyeta.online'
         },
         events: {
           onReady: function () { post('ready'); },
