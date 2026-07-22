@@ -212,7 +212,7 @@ export default function LiveClassScreen() {
         <View style={{ width: SCREEN_W, height: PLAYER_HEIGHT, backgroundColor: "#000" }}>
           <WebView
             key={webviewKey}
-            source={{ html: buildYouTubeEmbedHtml(videoId, { autoplay: true }), baseUrl: "https://www.youtube.com" }}
+            source={{ html: buildYouTubeEmbedHtml(videoId, { autoplay: true }), baseUrl: "https://sarvodayadhyeta.online" }}
             onMessage={onWebViewMessage}
             onError={onWebViewError}
             onHttpError={onWebViewError}
