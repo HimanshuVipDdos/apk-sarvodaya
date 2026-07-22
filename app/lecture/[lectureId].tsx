@@ -7,7 +7,7 @@ import { WebView, type WebViewNavigation } from "react-native-webview";
 import { Ionicons } from "@expo/vector-icons";
 import { supabase } from "@/lib/supabase";
 import { theme } from "@/lib/theme";
-import { extractYouTubeId, buildYouTubeEmbedHtml } from "@/lib/youtube";
+import { extractYouTubeId, buildYouTubeEmbedHtml, describeYouTubeError } from "@/lib/youtube";
 
 type LectureInfo = { id: string; title: string; youtube_url: string | null };
 
@@ -28,6 +28,30 @@ export default function LectureScreen() {
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [lecture, setLecture] = useState<LectureInfo | null>(null);
   const hasLoadedOnce = useRef(false);
+
+  // Player status — the YouTube IFrame API posts 'ready'/'error' messages
+  // back to us (see lib/youtube.ts). Without listening for these, a broken
+  // embed (deleted video, embedding disabled, invalid ID, etc.) just shows
+  // a silent black box with no feedback at all.
+  const [videoReady, setVideoReady] = useState(false);
+  const [videoError, setVideoError] = useState<string | null>(null);
+  const [webviewKey, setWebviewKey] = useState(0);
+
+  function onWebViewMessage(event: { nativeEvent: { data: string } }) {
+    try {
+      const msg = JSON.parse(event.nativeEvent.data);
+      if (msg.type === "ready") setVideoReady(true);
+      if (msg.type === "error") setVideoError(describeYouTubeError(msg.data));
+    } catch {
+      // ignore malformed messages
+    }
+  }
+
+  function retryVideo() {
+    setVideoError(null);
+    setVideoReady(false);
+    setWebviewKey((k) => k + 1); // forces the WebView to remount and reload the embed
+  }
 
   const load = useCallback(async () => {
     if (!lectureId) return;
@@ -104,7 +128,9 @@ export default function LectureScreen() {
       {videoId ? (
         <View style={{ width: SCREEN_W, height: PLAYER_HEIGHT, backgroundColor: "#000" }}>
           <WebView
+            key={webviewKey}
             source={{ html: buildYouTubeEmbedHtml(videoId), baseUrl: "https://www.youtube.com" }}
+            onMessage={onWebViewMessage}
             onShouldStartLoadWithRequest={(req: WebViewNavigation) => isAllowedNavigation(req.url)}
             allowsFullscreenVideo
             allowsInlineMediaPlayback
@@ -114,6 +140,20 @@ export default function LectureScreen() {
             domStorageEnabled
             style={{ flex: 1 }}
           />
+          {!videoReady && !videoError ? (
+            <View style={styles.playerOverlay} pointerEvents="none">
+              <ActivityIndicator color="#fff" />
+            </View>
+          ) : null}
+          {videoError ? (
+            <View style={styles.playerOverlay}>
+              <Ionicons name="alert-circle-outline" size={26} color="#fff" style={{ marginBottom: 8 }} />
+              <Text style={styles.videoErrorText}>{videoError}</Text>
+              <TouchableOpacity style={styles.retryVideoBtn} onPress={retryVideo}>
+                <Text style={styles.retryVideoBtnText}>Retry</Text>
+              </TouchableOpacity>
+            </View>
+          ) : null}
         </View>
       ) : (
         <View style={[styles.center, { height: PLAYER_HEIGHT }]}>
@@ -140,4 +180,14 @@ const styles = StyleSheet.create({
     backgroundColor: "#000",
   },
   topBarTitle: { flex: 1, color: "#fff", fontSize: 14, fontWeight: "700" },
+  playerOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: "rgba(0,0,0,0.75)",
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 30,
+  },
+  videoErrorText: { color: "#fff", fontSize: 13, textAlign: "center", lineHeight: 19, marginBottom: 14 },
+  retryVideoBtn: { backgroundColor: theme.gold, borderRadius: 10, paddingHorizontal: 20, paddingVertical: 9 },
+  retryVideoBtnText: { color: theme.navyDark, fontWeight: "700", fontSize: 13 },
 });
