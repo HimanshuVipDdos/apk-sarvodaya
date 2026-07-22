@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { View, Text, StyleSheet, ScrollView, ActivityIndicator, Animated } from "react-native";
+import { View, Text, StyleSheet, ScrollView, ActivityIndicator } from "react-native";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { getCbtAttemptResult, type ResultResponse } from "@/lib/cbt-api";
@@ -73,7 +73,7 @@ export default function ResultScreen() {
         </View>
         <View style={{ padding: 20, gap: 12 }}>
           {[0, 1, 2].map((i) => (
-            <Animated.View key={i} style={[styles.skeletonBlock, { opacity: pulse }]} />
+            <Animated_SkelBlock key={i} pulse={pulse} />
           ))}
         </View>
       </View>
@@ -225,6 +225,13 @@ function StatCard({ label, value, color, bg, icon }: { label: string; value: num
       <Text style={styles.statLabel}>{label}</Text>
     </View>
   );
+}
+
+// Tiny wrapper so the skeleton blocks can consume the shared `usePulse`
+// value without pulling in Animated directly in this file.
+function Animated_SkelBlock({ pulse }: { pulse: any }) {
+  const { Animated: RNAnimated } = require("react-native");
+  return <RNAnimated.View style={[styles.skeletonBlock, { opacity: pulse }]} />;
 }
 
 const styles = StyleSheet.create({
