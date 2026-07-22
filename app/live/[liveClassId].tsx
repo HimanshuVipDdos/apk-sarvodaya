@@ -10,7 +10,6 @@ import {
   KeyboardAvoidingView,
   Platform,
   Dimensions,
-  Linking,
 } from "react-native";
 import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
 import { StatusBar } from "expo-status-bar";
@@ -53,7 +52,6 @@ export default function LiveClassScreen() {
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [liveClass, setLiveClass] = useState<LiveClassInfo | null>(null);
   const [ended, setEnded] = useState(false);
-  const [playerUnavailable, setPlayerUnavailable] = useState(false);
   const [chatInput, setChatInput] = useState("");
   const [sending, setSending] = useState(false);
   const savedRef = useRef(false);
@@ -143,17 +141,10 @@ export default function LiveClassScreen() {
     try {
       const msg = JSON.parse(event.nativeEvent.data);
       if (msg.type === "ended") handleVideoEnded();
-      if (msg.type === "unavailable") setPlayerUnavailable(true);
     } catch {
       // ignore malformed messages
     }
   }
-
-  // Reset the fallback state whenever we're pointed at a different video
-  // (e.g. student backs out of a live class and opens a different one).
-  useEffect(() => {
-    setPlayerUnavailable(false);
-  }, [liveClass?.youtube_url]);
 
   // Belt-and-braces: even if our JS click-blocker inside the page misses a
   // case, the WebView itself refuses to navigate anywhere off-allowlist.
@@ -206,14 +197,12 @@ export default function LiveClassScreen() {
         )}
       </View>
 
-      {videoId && !playerUnavailable ? (
+      {videoId ? (
         <View style={{ width: SCREEN_W, height: PLAYER_HEIGHT, backgroundColor: "#000" }}>
           <WebView
-            key={videoId}
             source={{ html: buildYouTubeEmbedHtml(videoId, { autoplay: true }), baseUrl: "https://www.youtube.com" }}
             onMessage={onWebViewMessage}
             onShouldStartLoadWithRequest={onShouldStartLoad}
-            onHttpError={() => setPlayerUnavailable(true)}
             allowsFullscreenVideo
             allowsInlineMediaPlayback
             mediaPlaybackRequiresUserAction={false}
@@ -225,20 +214,7 @@ export default function LiveClassScreen() {
         </View>
       ) : (
         <View style={[styles.center, { height: PLAYER_HEIGHT }]}>
-          <Ionicons name="videocam-off-outline" size={28} color="#9aa3c7" style={{ marginBottom: 10 }} />
-          <Text style={styles.errorText}>
-            {videoId
-              ? "This video can't be played inside the app right now."
-              : "Video link not available for this class."}
-          </Text>
-          {videoId ? (
-            <TouchableOpacity
-              style={styles.backBtn}
-              onPress={() => Linking.openURL(liveClass.youtube_url ?? `https://www.youtube.com/watch?v=${videoId}`)}
-            >
-              <Text style={styles.backBtnText}>Watch on YouTube</Text>
-            </TouchableOpacity>
-          ) : null}
+          <Text style={styles.errorText}>Video link not available for this class.</Text>
         </View>
       )}
 
