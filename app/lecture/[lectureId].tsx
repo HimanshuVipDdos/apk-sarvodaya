@@ -3,23 +3,18 @@ import { View, Text, StyleSheet, ActivityIndicator, TouchableOpacity, Dimensions
 import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
 import { StatusBar } from "expo-status-bar";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { WebView, type WebViewNavigation } from "react-native-webview";
+import * as ScreenOrientation from "expo-screen-orientation";
 import { Ionicons } from "@expo/vector-icons";
 import { supabase } from "@/lib/supabase";
 import { theme } from "@/lib/theme";
 import { withTimeout } from "@/lib/with-timeout";
-import { extractYouTubeId, buildYouTubeEmbedHtml, describeYouTubeError } from "@/lib/youtube";
+import { extractYouTubeId } from "@/lib/youtube";
+import { YouTubePlayer, type YouTubePlayerHandle } from "@/components/YouTubePlayer";
 
 type LectureInfo = { id: string; title: string; youtube_url: string | null };
 
 const { width: SCREEN_W } = Dimensions.get("window");
 const PLAYER_HEIGHT = (SCREEN_W * 9) / 16;
-
-const ALLOWED_HOST_FRAGMENTS = ["youtube-nocookie.com", "youtube.com/embed", "ytimg.com", "googlevideo.com", "about:blank"];
-function isAllowedNavigation(url: string) {
-  if (url.startsWith("data:") || url.startsWith("blob:")) return true;
-  return ALLOWED_HOST_FRAGMENTS.some((frag) => url.includes(frag));
-}
 
 export default function LectureScreen() {
   const { lectureId } = useLocalSearchParams<{ lectureId: string }>();
@@ -29,30 +24,9 @@ export default function LectureScreen() {
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [lecture, setLecture] = useState<LectureInfo | null>(null);
   const hasLoadedOnce = useRef(false);
+  const playerRef = useRef<YouTubePlayerHandle>(null);
 
-  // Player status — the YouTube IFrame API posts 'ready'/'error' messages
-  // back to us (see lib/youtube.ts). Without listening for these, a broken
-  // embed (deleted video, embedding disabled, invalid ID, etc.) just shows
-  // a silent black box with no feedback at all.
-  const [videoReady, setVideoReady] = useState(false);
-  const [videoError, setVideoError] = useState<string | null>(null);
-  const [webviewKey, setWebviewKey] = useState(0);
-
-  function onWebViewMessage(event: { nativeEvent: { data: string } }) {
-    try {
-      const msg = JSON.parse(event.nativeEvent.data);
-      if (msg.type === "ready") setVideoReady(true);
-      if (msg.type === "error") setVideoError(describeYouTubeError(msg.data));
-    } catch {
-      // ignore malformed messages
-    }
-  }
-
-  function retryVideo() {
-    setVideoError(null);
-    setVideoReady(false);
-    setWebviewKey((k) => k + 1); // forces the WebView to remount and reload the embed
-  }
+  const [isFullscreen, setIsFullscreen] = useState(false);
 
   const load = useCallback(async () => {
     if (!lectureId) return;
@@ -94,6 +68,27 @@ export default function LectureScreen() {
     }, [lectureId])
   );
 
+  // Always leave fullscreen + relock portrait when this screen loses focus
+  // or unmounts, so the rest of the app never gets stuck in landscape.
+  useFocusEffect(
+    useCallback(() => {
+      return () => {
+        setIsFullscreen(false);
+        ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT_UP).catch(() => {});
+      };
+    }, [])
+  );
+
+  const toggleFullscreen = useCallback(() => {
+    setIsFullscreen((prev) => {
+      const next = !prev;
+      ScreenOrientation.lockAsync(
+        next ? ScreenOrientation.OrientationLock.LANDSCAPE : ScreenOrientation.OrientationLock.PORTRAIT_UP
+      ).catch(() => {});
+      return next;
+    });
+  }, []);
+
   if (loading) {
     return (
       <View style={styles.center}>
@@ -115,6 +110,32 @@ export default function LectureScreen() {
 
   const videoId = extractYouTubeId(lecture.youtube_url);
 
+  const videoBox = videoId ? (
+    <View style={{ flex: 1, backgroundColor: "#000" }}>
+      <YouTubePlayer ref={playerRef} videoId={videoId} autoplay onFullscreenToggle={toggleFullscreen} />
+    </View>
+  ) : (
+    <View style={[styles.center, { flex: 1 }]}>
+      <Text style={styles.errorText}>Video link not available for this lecture.</Text>
+    </View>
+  );
+
+  if (isFullscreen) {
+    return (
+      <View style={styles.fullscreenRoot}>
+        <StatusBar hidden />
+        {videoBox}
+        <TouchableOpacity
+          style={[styles.fsFloatingBtn, { left: insets.left + 10, top: insets.top + 8 }]}
+          onPress={toggleFullscreen}
+          hitSlop={10}
+        >
+          <Ionicons name="contract" size={18} color="#fff" />
+        </TouchableOpacity>
+      </View>
+    );
+  }
+
   return (
     <View style={{ flex: 1, backgroundColor: "#000" }}>
       {/* Full black background here — status bar icons need to be light,
@@ -131,41 +152,7 @@ export default function LectureScreen() {
         <View style={{ width: 24 }} />
       </View>
 
-      {videoId ? (
-        <View style={{ width: SCREEN_W, height: PLAYER_HEIGHT, backgroundColor: "#000" }}>
-          <WebView
-            key={webviewKey}
-            source={{ html: buildYouTubeEmbedHtml(videoId), baseUrl: "https://www.youtube.com" }}
-            onMessage={onWebViewMessage}
-            onShouldStartLoadWithRequest={(req: WebViewNavigation) => isAllowedNavigation(req.url)}
-            allowsFullscreenVideo
-            allowsInlineMediaPlayback
-            mediaPlaybackRequiresUserAction={false}
-            setSupportMultipleWindows={false}
-            javaScriptEnabled
-            domStorageEnabled
-            style={{ flex: 1 }}
-          />
-          {!videoReady && !videoError ? (
-            <View style={styles.playerOverlay} pointerEvents="none">
-              <ActivityIndicator color="#fff" />
-            </View>
-          ) : null}
-          {videoError ? (
-            <View style={styles.playerOverlay}>
-              <Ionicons name="alert-circle-outline" size={26} color="#fff" style={{ marginBottom: 8 }} />
-              <Text style={styles.videoErrorText}>{videoError}</Text>
-              <TouchableOpacity style={styles.retryVideoBtn} onPress={retryVideo}>
-                <Text style={styles.retryVideoBtnText}>Retry</Text>
-              </TouchableOpacity>
-            </View>
-          ) : null}
-        </View>
-      ) : (
-        <View style={[styles.center, { height: PLAYER_HEIGHT }]}>
-          <Text style={styles.errorText}>Video link not available for this lecture.</Text>
-        </View>
-      )}
+      <View style={{ width: SCREEN_W, height: PLAYER_HEIGHT, backgroundColor: "#000" }}>{videoBox}</View>
 
       <View style={{ flex: 1, backgroundColor: theme.cream }} />
     </View>
@@ -186,14 +173,14 @@ const styles = StyleSheet.create({
     backgroundColor: "#000",
   },
   topBarTitle: { flex: 1, color: "#fff", fontSize: 14, fontWeight: "700" },
-  playerOverlay: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: "rgba(0,0,0,0.75)",
+  fullscreenRoot: { flex: 1, backgroundColor: "#000" },
+  fsFloatingBtn: {
+    position: "absolute",
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    backgroundColor: "rgba(0,0,0,0.45)",
     alignItems: "center",
     justifyContent: "center",
-    paddingHorizontal: 30,
   },
-  videoErrorText: { color: "#fff", fontSize: 13, textAlign: "center", lineHeight: 19, marginBottom: 14 },
-  retryVideoBtn: { backgroundColor: theme.gold, borderRadius: 10, paddingHorizontal: 20, paddingVertical: 9 },
-  retryVideoBtnText: { color: theme.navyDark, fontWeight: "700", fontSize: 13 },
 });
