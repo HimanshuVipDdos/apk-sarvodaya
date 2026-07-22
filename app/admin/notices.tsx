@@ -9,8 +9,10 @@ import {
   TextInput,
   Alert,
   Modal,
+  Switch,
 } from "react-native";
 import { useFocusEffect } from "expo-router";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { supabase } from "@/lib/supabase";
 import { theme } from "@/lib/theme";
@@ -38,6 +40,7 @@ const CATEGORIES = [
 ];
 
 export default function AdminNoticesScreen() {
+  const insets = useSafeAreaInsets();
   const [loading, setLoading] = useState(true);
   const [notices, setNotices] = useState<Notice[]>([]);
   const [showForm, setShowForm] = useState(false);
@@ -77,12 +80,25 @@ export default function AdminNoticesScreen() {
       Alert.alert("Title required", "Please enter a title for the notice.");
       return;
     }
+
+    let normalizedLink = linkUrl.trim();
+    if (normalizedLink) {
+      if (!/^https?:\/\//i.test(normalizedLink)) normalizedLink = `https://${normalizedLink}`;
+      try {
+        // eslint-disable-next-line no-new
+        new URL(normalizedLink);
+      } catch {
+        Alert.alert("Invalid link", "Please enter a valid link, e.g. https://example.com");
+        return;
+      }
+    }
+
     setSaving(true);
     const { error } = await supabase.from("notifications").insert({
       title: title.trim(),
       category,
       body: body.trim() || null,
-      link_url: linkUrl.trim() || null,
+      link_url: normalizedLink || null,
       is_active: true,
     });
     setSaving(false);
@@ -93,6 +109,17 @@ export default function AdminNoticesScreen() {
     resetForm();
     setShowForm(false);
     load();
+  }
+
+  async function toggleActive(notice: Notice) {
+    // Optimistic update so the switch feels instant; revert via reload if
+    // the server rejects it.
+    setNotices((prev) => prev.map((n) => (n.id === notice.id ? { ...n, is_active: !n.is_active } : n)));
+    const { error } = await supabase.from("notifications").update({ is_active: !notice.is_active }).eq("id", notice.id);
+    if (error) {
+      Alert.alert("Could not update", error.message);
+      load();
+    }
   }
 
   function confirmDelete(notice: Notice) {
@@ -112,7 +139,7 @@ export default function AdminNoticesScreen() {
 
   return (
     <View style={styles.container}>
-      <View style={styles.header}>
+      <View style={[styles.header, { paddingTop: insets.top + 10 }]}>
         <Text style={styles.headerTitle}>Notices</Text>
         <TouchableOpacity style={styles.addButton} onPress={() => setShowForm(true)}>
           <Ionicons name="add" size={18} color="#fff" />
@@ -135,8 +162,9 @@ export default function AdminNoticesScreen() {
                 <Text style={styles.cardTitle}>{item.title}</Text>
                 <Text style={styles.cardStatus}>{item.is_active ? "🟢 Live" : "⚪ Hidden"}</Text>
               </View>
-              <TouchableOpacity onPress={() => confirmDelete(item)}>
-                <Ionicons name="trash-outline" size={18} color="#dc2626" />
+              <Switch value={item.is_active} onValueChange={() => toggleActive(item)} trackColor={{ true: theme.navy }} />
+              <TouchableOpacity onPress={() => confirmDelete(item)} style={{ marginLeft: 10 }}>
+                <Ionicons name="trash-outline" size={18} color={theme.dangerText} />
               </TouchableOpacity>
             </View>
           )}
@@ -212,7 +240,6 @@ export default function AdminNoticesScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: theme.cream },
   header: {
-    paddingTop: 50,
     paddingHorizontal: 18,
     paddingBottom: 14,
     backgroundColor: "#fff",
