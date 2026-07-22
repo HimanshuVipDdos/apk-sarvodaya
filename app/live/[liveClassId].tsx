@@ -33,10 +33,6 @@ type LiveClassInfo = {
 const { width: SCREEN_W } = Dimensions.get("window");
 const PLAYER_HEIGHT = (SCREEN_W * 9) / 16;
 
-// Only allow the WebView to stay on the youtube-nocookie embed / youtube static
-// asset domains. Anything else (youtube.com/watch, m.youtube.com, app store
-// links, intent:// deep links to the YouTube app, etc.) gets cancelled so the
-// student is never bounced out of the app.
 const ALLOWED_HOST_FRAGMENTS = ["youtube-nocookie.com", "youtube.com/embed", "ytimg.com", "googlevideo.com", "about:blank"];
 
 function isAllowedNavigation(url: string) {
@@ -59,35 +55,23 @@ export default function LiveClassScreen() {
   const listRef = useRef<FlatList>(null);
   const hasLoadedOnce = useRef(false);
 
-  // Player status — the YouTube IFrame API posts 'ready'/'error' messages
-  // back to us. Without listening for 'error' specifically, a broken embed
-  // (deleted video, embedding disabled, invalid ID, geo/age block) just
-  // shows a silent black box with nothing on screen — no way for the
-  // student to know if it's their connection or a genuinely broken link.
   const [videoReady, setVideoReady] = useState(false);
   const [videoError, setVideoError] = useState<string | null>(null);
   const [webviewKey, setWebviewKey] = useState(0);
+  const autoRetryCount = useRef(0);
+  const MAX_AUTO_RETRIES = 3;
 
   function retryVideo() {
+    autoRetryCount.current = 0;
     setVideoError(null);
     setVideoReady(false);
-    setWebviewKey((k) => k + 1); // forces the WebView to remount and reload the embed
+    setWebviewKey((k) => k + 1);
   }
 
   const { messages, loading: chatLoading, send } = useLiveChat(liveClassId ?? "");
 
-  // Screenshot/recording is blocked app-wide from app/_layout.tsx — nothing
-  // extra needed here, so unmounting this screen doesn't accidentally re-enable
-  // capture for the rest of the app.
-
   const load = useCallback(async () => {
     if (!liveClassId) return;
-    // Only show the full-screen loader on the very first load. Refetching
-    // on every focus regain (e.g. student switches apps and comes back) must
-    // NOT flip `loading` back to true — that would swap out this whole
-    // screen's tree, unmounting the video WebView and restarting playback
-    // from 0 every single time. Metadata (title / is_live badge) still
-    // refreshes quietly in the background.
     if (!hasLoadedOnce.current) setLoading(true);
     try {
       const { data, error } = await withTimeout(
@@ -100,9 +84,6 @@ export default function LiveClassScreen() {
 
       if (error) {
         console.warn("[live] load failed:", error.message);
-        // Never blow away a live class that's already playing just because a
-        // background metadata refresh hiccuped — only surface the error
-        // screen if we have nothing on screen yet.
         if (!liveClass) setErrorMsg(error.message);
       } else if (!data) {
         if (!liveClass) setErrorMsg("This class could not be found.");
@@ -111,9 +92,6 @@ export default function LiveClassScreen() {
         setErrorMsg(null);
       }
     } catch (err: any) {
-      // withTimeout rejects here if the request hangs — without this, a slow
-      // or dropped connection would leave the loading spinner running
-      // forever with no way for the student to tell "is it working or not".
       console.warn("[live] load failed:", err);
       if (!liveClass) setErrorMsg(err?.message ?? "Couldn't load this class.");
     }
@@ -127,12 +105,6 @@ export default function LiveClassScreen() {
     }, [load])
   );
 
-  // ---- When the embedded player reports the video has ended: ----
-  // 1) flip live_classes.is_live -> false (server-side "tick_live_classes" is a
-  //    safety net for classes nobody watched to the end)
-  // 2) auto-create/publish the matching row in `lectures` so it shows up as a
-  //    recorded lecture, using the SAME youtube link (embedded, no redirect).
-  // Guarded by `source_live_class_id` so replays never create duplicates.
   const handleVideoEnded = useCallback(async () => {
     if (savedRef.current || !liveClass) return;
     savedRef.current = true;
@@ -157,8 +129,6 @@ export default function LiveClassScreen() {
         });
       }
     } catch (err) {
-      // Non-fatal for the student's viewing experience — admin can still
-      // publish the recording manually from the website if this silently fails.
       console.warn("[live] auto-save to lectures failed:", err);
     }
   }, [liveClass]);
@@ -167,15 +137,30 @@ export default function LiveClassScreen() {
     try {
       const msg = JSON.parse(event.nativeEvent.data);
       if (msg.type === "ended") handleVideoEnded();
-      if (msg.type === "ready") setVideoReady(true);
-      if (msg.type === "error") setVideoError(describeYouTubeError(msg.data));
+      if (msg.type === "ready") {
+        setVideoReady(true);
+        autoRetryCount.current = 0;
+      }
+      if (msg.type === "error") {
+        if (autoRetryCount.current < MAX_AUTO_RETRIES) {
+          autoRetryCount.current += 1;
+          setTimeout(() => {
+            setVideoReady(false);
+            setWebviewKey((k) => k + 1);
+          }, 2500);
+        } else {
+          setVideoError(describeYouTubeError(msg.data));
+        }
+      }
     } catch {
       // ignore malformed messages
     }
   }
 
-  // Belt-and-braces: even if our JS click-blocker inside the page misses a
-  // case, the WebView itself refuses to navigate anywhere off-allowlist.
+  function onWebViewError() {
+    setVideoError("Network error loading the video. Please check your internet connection.");
+  }
+
   function onShouldStartLoad(request: WebViewNavigation) {
     return isAllowedNavigation(request.url);
   }
@@ -206,8 +191,6 @@ export default function LiveClassScreen() {
       style={{ flex: 1, backgroundColor: "#000" }}
       behavior={Platform.OS === "ios" ? "padding" : "height"}
     >
-      {/* This screen is a full black background — status bar icons need to
-          be light here, regardless of the app-wide "dark" default. */}
       <StatusBar style="light" />
       <View style={[styles.topBar, { paddingTop: insets.top + 10 }]}>
         <TouchableOpacity onPress={() => router.back()} hitSlop={10}>
@@ -231,6 +214,8 @@ export default function LiveClassScreen() {
             key={webviewKey}
             source={{ html: buildYouTubeEmbedHtml(videoId, { autoplay: true }), baseUrl: "https://www.youtube.com" }}
             onMessage={onWebViewMessage}
+            onError={onWebViewError}
+            onHttpError={onWebViewError}
             onShouldStartLoadWithRequest={onShouldStartLoad}
             allowsFullscreenVideo
             allowsInlineMediaPlayback
@@ -238,6 +223,7 @@ export default function LiveClassScreen() {
             setSupportMultipleWindows={false}
             javaScriptEnabled
             domStorageEnabled
+            mixedContentMode="always"
             style={{ flex: 1 }}
           />
           {!videoReady && !videoError ? (
