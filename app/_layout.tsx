@@ -23,8 +23,11 @@ function RootNavigation() {
       ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT_UP).catch(() => {});
     }
   }, [segments]);
+
+  useEffect(() => {
+    try {
       ScreenCapture.preventScreenCaptureAsync().catch(() => {});
-    } catch {
+    } catch (e) {
       // native module not available in this build yet — ignore
     }
   }, []);
