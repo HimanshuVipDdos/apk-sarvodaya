@@ -13,6 +13,7 @@ import {
   Modal,
 } from "react-native";
 import { useFocusEffect } from "expo-router";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import * as ImagePicker from "expo-image-picker";
 import { Ionicons } from "@expo/vector-icons";
 import { supabase } from "@/lib/supabase";
@@ -32,6 +33,7 @@ type Slide = {
 };
 
 export default function AdminHeroSlidesScreen() {
+  const insets = useSafeAreaInsets();
   const [loading, setLoading] = useState(true);
   const [slides, setSlides] = useState<Slide[]>([]);
   const [showForm, setShowForm] = useState(false);
@@ -89,6 +91,32 @@ export default function AdminHeroSlidesScreen() {
       Alert.alert("Photo required", "Please pick a slide image first.");
       return;
     }
+
+    // Normalize/validate the link so it actually works when a student taps
+    // the slide later — an admin typing "example.com" without a scheme, or a
+    // WhatsApp number with spaces/dashes, would otherwise silently fail to open.
+    let normalizedLinkValue = linkValue.trim();
+    if (linkType === "url" && normalizedLinkValue) {
+      if (!/^https?:\/\//i.test(normalizedLinkValue)) {
+        normalizedLinkValue = `https://${normalizedLinkValue}`;
+      }
+      try {
+        // Throws if not a well-formed URL at all.
+        // eslint-disable-next-line no-new
+        new URL(normalizedLinkValue);
+      } catch {
+        Alert.alert("Invalid URL", "Please enter a valid link, e.g. https://example.com");
+        return;
+      }
+    } else if (linkType === "whatsapp" && normalizedLinkValue) {
+      const digitsOnly = normalizedLinkValue.replace(/[^\d]/g, "");
+      if (digitsOnly.length < 10) {
+        Alert.alert("Invalid number", "Please enter a valid WhatsApp number with country code, e.g. 919876543210.");
+        return;
+      }
+      normalizedLinkValue = digitsOnly;
+    }
+
     setUploading(true);
     try {
       const path = `${Date.now()}-${Math.random().toString(36).slice(2)}.${pickedImage.ext}`;
@@ -106,7 +134,7 @@ export default function AdminHeroSlidesScreen() {
         image_url: pub.publicUrl,
         title: title.trim() || null,
         link_type: linkType,
-        link_value: linkType === "none" ? null : linkValue.trim() || null,
+        link_value: linkType === "none" ? null : normalizedLinkValue || null,
         sort_order: nextSort,
         is_active: true,
       });
@@ -132,6 +160,15 @@ export default function AdminHeroSlidesScreen() {
     }
   }
 
+  // Extracts the storage object path from a Supabase public URL, e.g.
+  // ".../storage/v1/object/public/hero-slides/172001-abc.jpg" -> "172001-abc.jpg"
+  function storagePathFromPublicUrl(url: string): string | null {
+    const marker = "/hero-slides/";
+    const idx = url.indexOf(marker);
+    if (idx === -1) return null;
+    return decodeURIComponent(url.slice(idx + marker.length));
+  }
+
   function confirmDelete(slide: Slide) {
     Alert.alert("Delete this slide?", "This can't be undone.", [
       { text: "Cancel", style: "cancel" },
@@ -140,8 +177,21 @@ export default function AdminHeroSlidesScreen() {
         style: "destructive",
         onPress: async () => {
           const { error } = await supabase.from("hero_slides").delete().eq("id", slide.id);
-          if (error) Alert.alert("Delete failed", error.message);
-          else load();
+          if (error) {
+            Alert.alert("Delete failed", error.message);
+            return;
+          }
+          // Clean up the actual image file too — otherwise every deleted
+          // slide leaves an orphaned file in storage forever, quietly
+          // growing storage usage/cost with nothing pointing to it.
+          const path = storagePathFromPublicUrl(slide.image_url);
+          if (path) {
+            supabase.storage
+              .from("hero-slides")
+              .remove([path])
+              .catch((err) => console.warn("[hero-slides] storage cleanup failed:", err));
+          }
+          load();
         },
       },
     ]);
@@ -149,7 +199,7 @@ export default function AdminHeroSlidesScreen() {
 
   return (
     <View style={styles.container}>
-      <View style={styles.header}>
+      <View style={[styles.header, { paddingTop: insets.top + 10 }]}>
         <Text style={styles.headerTitle}>Homepage Slider</Text>
         <TouchableOpacity style={styles.addButton} onPress={() => setShowForm(true)}>
           <Ionicons name="add" size={18} color="#fff" />
@@ -270,7 +320,6 @@ function decodeBase64(base64: string): Uint8Array {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: theme.cream },
   header: {
-    paddingTop: 50,
     paddingHorizontal: 18,
     paddingBottom: 14,
     backgroundColor: "#fff",
