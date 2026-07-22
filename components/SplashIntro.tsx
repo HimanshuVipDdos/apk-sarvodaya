@@ -3,8 +3,7 @@ import { Animated, Easing, Image, StyleSheet, Text, View } from "react-native";
 import { theme } from "@/lib/theme";
 
 // One-time motion-graphics style intro shown on cold app open, before the
-// session check redirects to /login or /(tabs)/dashboard. Replaces the old
-// plain spinning ActivityIndicator.
+// session check redirects to /login or /(tabs)/dashboard.
 export function SplashIntro({
   ready,
   onFinish,
@@ -34,20 +33,6 @@ export function SplashIntro({
   const [exiting, setExiting] = useState(false);
 
   useEffect(() => {
-    (async () => {
-      try {
-        const { Audio } = await import("expo-av");
-        await Audio.setAudioModeAsync({ playsInSilentModeIOS: true });
-        const { sound } = await Audio.Sound.createAsync(
-          require("@/assets/intro-chime.mp3"),
-          { shouldPlay: true, volume: 0.7 }
-        );
-        setTimeout(() => sound.unloadAsync().catch(() => {}), 3000);
-      } catch {
-        // No sound asset bundled yet, or audio unavailable — silent intro is fine.
-      }
-    })();
-
     Animated.sequence([
       Animated.parallel([
         Animated.timing(stageOpacity, { toValue: 1, duration: 280, useNativeDriver: true }),
