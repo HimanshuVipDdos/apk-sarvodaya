@@ -1,41 +1,50 @@
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView } from "react-native";
+import { View, Text, StyleSheet, ScrollView } from "react-native";
 import { useRouter } from "expo-router";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { theme } from "@/lib/theme";
+import { RiseIn, PressScale } from "@/components/Motion";
 
 export default function AdminHomeScreen() {
   const router = useRouter();
+  const insets = useSafeAreaInsets();
 
   return (
-    <ScrollView style={styles.container} contentContainerStyle={{ padding: 20, paddingTop: 50 }}>
-      <Text style={styles.heading}>Admin Tools</Text>
-      <Text style={styles.subheading}>
-        Quick actions from your phone. For full control (question bank, bulk uploads, AI
-        parser, enrollments, results etc.) use the website admin panel — everything you do
-        here or there shows up in both places instantly, same database.
-      </Text>
+    <ScrollView style={styles.container} contentContainerStyle={{ padding: 20, paddingTop: insets.top + 24 }}>
+      <RiseIn>
+        <Text style={styles.heading}>Admin Tools</Text>
+        <Text style={styles.subheading}>
+          Quick actions from your phone. For full control (question bank, bulk uploads, AI
+          parser, enrollments, results etc.) use the website admin panel — everything you do
+          here or there shows up in both places instantly, same database.
+        </Text>
+      </RiseIn>
 
-      <TouchableOpacity style={styles.card} onPress={() => router.push("/admin/hero-slides")}>
-        <View style={styles.iconWrap}>
-          <Ionicons name="images" size={20} color={theme.navy} />
-        </View>
-        <View style={{ flex: 1 }}>
-          <Text style={styles.cardTitle}>Homepage Slider</Text>
-          <Text style={styles.cardDesc}>Add, reorder, or remove the promo images shown at the top of the app & website.</Text>
-        </View>
-        <Ionicons name="chevron-forward" size={18} color={theme.textMuted} />
-      </TouchableOpacity>
+      <RiseIn delay={80}>
+        <PressScale style={styles.card} onPress={() => router.push("/admin/hero-slides")}>
+          <View style={styles.iconWrap}>
+            <Ionicons name="images" size={20} color={theme.navy} />
+          </View>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.cardTitle}>Homepage Slider</Text>
+            <Text style={styles.cardDesc}>Add, reorder, or remove the promo images shown at the top of the app & website.</Text>
+          </View>
+          <Ionicons name="chevron-forward" size={18} color={theme.textMuted} />
+        </PressScale>
+      </RiseIn>
 
-      <TouchableOpacity style={styles.card} onPress={() => router.push("/admin/notices")}>
-        <View style={styles.iconWrap}>
-          <Ionicons name="megaphone" size={20} color={theme.navy} />
-        </View>
-        <View style={{ flex: 1 }}>
-          <Text style={styles.cardTitle}>Notices</Text>
-          <Text style={styles.cardDesc}>Post vacancy/admit-card/result notices instantly to all students.</Text>
-        </View>
-        <Ionicons name="chevron-forward" size={18} color={theme.textMuted} />
-      </TouchableOpacity>
+      <RiseIn delay={140}>
+        <PressScale style={styles.card} onPress={() => router.push("/admin/notices")}>
+          <View style={styles.iconWrap}>
+            <Ionicons name="megaphone" size={20} color={theme.navy} />
+          </View>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.cardTitle}>Notices</Text>
+            <Text style={styles.cardDesc}>Post vacancy/admit-card/result notices instantly to all students.</Text>
+          </View>
+          <Ionicons name="chevron-forward" size={18} color={theme.textMuted} />
+        </PressScale>
+      </RiseIn>
     </ScrollView>
   );
 }
