@@ -8,18 +8,19 @@
 // can actually act on, instead of a silent black box with nothing on screen.
 // https://developers.google.com/youtube/iframe_api_reference#onError
 export function describeYouTubeError(code: number | null | undefined): string {
+  const suffix = code !== null && code !== undefined ? ` (Error ${code})` : "";
   switch (code) {
     case 2:
-      return "This video link looks invalid. Please tell your teacher — the video ID may be wrong.";
+      return "This video link looks invalid. Please tell your teacher — the video ID may be wrong." + suffix;
     case 5:
-      return "This video can't play in this app right now. Try again in a moment.";
+      return "This video can't play in this app right now. Try again in a moment." + suffix;
     case 100:
-      return "This video was removed or made private by its owner.";
+      return "This video was removed or made private by its owner." + suffix;
     case 101:
     case 150:
-      return "The video owner has disabled playback in embedded apps like this one.";
+      return "The video owner has disabled playback in embedded apps like this one." + suffix;
     default:
-      return "Couldn't load this video. Please check your connection and try again.";
+      return "Couldn't load this video. Please check your connection and try again." + suffix;
   }
 }
 
@@ -64,11 +65,25 @@ export function buildYouTubeEmbedHtml(videoId: string, opts?: { autoplay?: boole
 
     var player;
     var ended = false;
+    var loadStartedAt = Date.now();
+
     function post(type, data) {
       if (window.ReactNativeWebView) {
         window.ReactNativeWebView.postMessage(JSON.stringify({ type: type, data: data || null }));
       }
     }
+
+    // If the YouTube iframe_api script itself never loads (network drop,
+    // firewall blocking youtube.com, DNS hiccup), onYouTubeIframeAPIReady
+    // never fires and nothing else in this page ever posts a message back —
+    // React Native would be stuck showing a spinner forever with no way to
+    // know anything failed. This catches that specific silent-failure case.
+    tag.onerror = function () {
+      post('error', 'SCRIPT_LOAD_FAILED');
+    };
+    setTimeout(function () {
+      if (!player) post('error', 'SCRIPT_LOAD_TIMEOUT');
+    }, 10000);
 
     function onYouTubeIframeAPIReady() {
       player = new YT.Player('player', {
