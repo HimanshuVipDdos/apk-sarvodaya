@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
-import { View, Text, StyleSheet, ScrollView, ActivityIndicator, TouchableOpacity, Linking, Image, Animated } from "react-native";
+import { View, Text, StyleSheet, ScrollView, ActivityIndicator, TouchableOpacity, Image, Animated } from "react-native";
 import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { supabase } from "@/lib/supabase";
@@ -27,7 +27,6 @@ function formatInr(n?: number | null) {
 const TABS = ["Live", "Lectures", "Tests", "Notes"] as const;
 type Tab = (typeof TABS)[number];
 
-// Generic state machine for one independent section of the page (one tab's data).
 type SectionState<T> = { loading: boolean; error: string | null; data: T[] };
 const initialSection = <T,>(): SectionState<T> => ({ loading: true, error: null, data: [] });
 
@@ -46,13 +45,6 @@ export default function BatchDetailScreen() {
   const [tests, setTests] = useState<SectionState<CbtTest>>(initialSection);
   const [materials, setMaterials] = useState<SectionState<Material>>(initialSection);
 
-  // Every one of the 5 loaders below (header + 4 tabs) is independent, but
-  // they all share the same problem: `useFocusEffect` reruns them every time
-  // the student comes back to this screen (e.g. pressing back from a lecture
-  // or live class). Without this, each one would flip its own `loading` back
-  // to true and blank out already-visible content on every return visit.
-  // This tracks "has this section ever finished its first load" so only the
-  // very first load shows a spinner — everything after refreshes quietly.
   const loadedOnce = useRef({ header: false, live: false, lectures: false, tests: false, materials: false });
 
   const fadeAnim = useRef(new Animated.Value(0)).current;
@@ -76,7 +68,6 @@ export default function BatchDetailScreen() {
       setBatchInfo((res.data as any) ?? null);
     } catch (err: any) {
       if (!mountedRef.current) return;
-      // Don't blank out an already-loaded header over a transient refresh error.
       if (!loadedOnce.current.header) setHeaderError(err?.message ?? "Couldn't load this batch.");
     } finally {
       if (mountedRef.current) setHeaderLoading(false);
@@ -97,8 +88,6 @@ export default function BatchDetailScreen() {
       if (!mountedRef.current) return;
       setLive((s) => ({
         loading: false,
-        // Keep whatever list was already showing; only surface the error
-        // block if this section has never successfully loaded.
         error: loadedOnce.current.live ? null : err?.message ?? "Couldn't load live classes.",
         data: s.data,
       }));
@@ -172,7 +161,6 @@ export default function BatchDetailScreen() {
 
   useFocusEffect(
     useCallback(() => {
-      // Best-effort, fire-and-forget — never blocks anything on this page.
       try {
         supabase.rpc("tick_live_classes").catch(() => {});
       } catch {
@@ -319,7 +307,15 @@ export default function BatchDetailScreen() {
             onRetry={loadMaterials}
             emptyText="No notes/DPPs uploaded yet."
             renderItem={(m: Material) => (
-              <TouchableOpacity key={m.id} style={styles.card} activeOpacity={0.8} onPress={() => m.file_url && Linking.openURL(m.file_url)}>
+              <TouchableOpacity
+                key={m.id}
+                style={styles.card}
+                activeOpacity={0.8}
+                onPress={() =>
+                  m.file_url &&
+                  router.push({ pathname: "/notes-viewer", params: { url: m.file_url, title: m.title } })
+                }
+              >
                 <Text style={styles.pdfIcon}>📄</Text>
                 <View style={{ flex: 1, marginLeft: 10 }}>
                   <Text style={styles.cardTitle}>{m.title}</Text>
@@ -334,8 +330,6 @@ export default function BatchDetailScreen() {
   );
 }
 
-// Shared "loading / error+retry / empty / list" rendering for one tab's data,
-// completely independent from the other tabs and from the header above.
 function SectionBody<T>({
   state,
   onRetry,
