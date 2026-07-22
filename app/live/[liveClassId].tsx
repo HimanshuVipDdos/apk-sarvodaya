@@ -19,7 +19,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { supabase } from "@/lib/supabase";
 import { theme } from "@/lib/theme";
 import { useLiveChat } from "@/lib/live-chat";
-import { extractYouTubeId, buildYouTubeEmbedHtml } from "@/lib/youtube";
+import { extractYouTubeId, buildYouTubeEmbedHtml, describeYouTubeError } from "@/lib/youtube";
 
 type LiveClassInfo = {
   id: string;
@@ -57,6 +57,21 @@ export default function LiveClassScreen() {
   const savedRef = useRef(false);
   const listRef = useRef<FlatList>(null);
   const hasLoadedOnce = useRef(false);
+
+  // Player status — the YouTube IFrame API posts 'ready'/'error' messages
+  // back to us. Without listening for 'error' specifically, a broken embed
+  // (deleted video, embedding disabled, invalid ID, geo/age block) just
+  // shows a silent black box with nothing on screen — no way for the
+  // student to know if it's their connection or a genuinely broken link.
+  const [videoReady, setVideoReady] = useState(false);
+  const [videoError, setVideoError] = useState<string | null>(null);
+  const [webviewKey, setWebviewKey] = useState(0);
+
+  function retryVideo() {
+    setVideoError(null);
+    setVideoReady(false);
+    setWebviewKey((k) => k + 1); // forces the WebView to remount and reload the embed
+  }
 
   const { messages, loading: chatLoading, send } = useLiveChat(liveClassId ?? "");
 
@@ -141,6 +156,8 @@ export default function LiveClassScreen() {
     try {
       const msg = JSON.parse(event.nativeEvent.data);
       if (msg.type === "ended") handleVideoEnded();
+      if (msg.type === "ready") setVideoReady(true);
+      if (msg.type === "error") setVideoError(describeYouTubeError(msg.data));
     } catch {
       // ignore malformed messages
     }
@@ -200,6 +217,7 @@ export default function LiveClassScreen() {
       {videoId ? (
         <View style={{ width: SCREEN_W, height: PLAYER_HEIGHT, backgroundColor: "#000" }}>
           <WebView
+            key={webviewKey}
             source={{ html: buildYouTubeEmbedHtml(videoId, { autoplay: true }), baseUrl: "https://www.youtube.com" }}
             onMessage={onWebViewMessage}
             onShouldStartLoadWithRequest={onShouldStartLoad}
@@ -211,6 +229,20 @@ export default function LiveClassScreen() {
             domStorageEnabled
             style={{ flex: 1 }}
           />
+          {!videoReady && !videoError ? (
+            <View style={styles.playerOverlay} pointerEvents="none">
+              <ActivityIndicator color="#fff" />
+            </View>
+          ) : null}
+          {videoError ? (
+            <View style={styles.playerOverlay}>
+              <Ionicons name="alert-circle-outline" size={26} color="#fff" style={{ marginBottom: 8 }} />
+              <Text style={styles.videoErrorText}>{videoError}</Text>
+              <TouchableOpacity style={styles.retryVideoBtn} onPress={retryVideo}>
+                <Text style={styles.retryVideoBtnText}>Retry</Text>
+              </TouchableOpacity>
+            </View>
+          ) : null}
         </View>
       ) : (
         <View style={[styles.center, { height: PLAYER_HEIGHT }]}>
@@ -299,6 +331,16 @@ const styles = StyleSheet.create({
   topBarTitle: { flex: 1, color: "#fff", fontSize: 14, fontWeight: "700" },
   liveTag: { backgroundColor: "#dc2626", borderRadius: 10, paddingHorizontal: 8, paddingVertical: 4 },
   liveTagText: { color: "#fff", fontSize: 10, fontWeight: "700" },
+  playerOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: "rgba(0,0,0,0.75)",
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 30,
+  },
+  videoErrorText: { color: "#fff", fontSize: 13, textAlign: "center", lineHeight: 19, marginBottom: 14 },
+  retryVideoBtn: { backgroundColor: theme.gold, borderRadius: 10, paddingHorizontal: 20, paddingVertical: 9 },
+  retryVideoBtnText: { color: theme.navyDark, fontWeight: "700", fontSize: 13 },
   endedBanner: {
     flexDirection: "row",
     alignItems: "center",
