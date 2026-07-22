@@ -7,6 +7,7 @@ import { WebView, type WebViewNavigation } from "react-native-webview";
 import { Ionicons } from "@expo/vector-icons";
 import { supabase } from "@/lib/supabase";
 import { theme } from "@/lib/theme";
+import { withTimeout } from "@/lib/with-timeout";
 import { extractYouTubeId, buildYouTubeEmbedHtml, describeYouTubeError } from "@/lib/youtube";
 
 type LectureInfo = { id: string; title: string; youtube_url: string | null };
@@ -61,21 +62,26 @@ export default function LectureScreen() {
     // whole screen including the WebView, restarting the video from 0 on
     // every single app foreground.
     if (!hasLoadedOnce.current) setLoading(true);
-    const { data, error } = await supabase
-      .from("lectures")
-      .select("id,title,youtube_url")
-      .eq("id", lectureId)
-      .maybeSingle();
+    try {
+      const { data, error } = await withTimeout(
+        supabase.from("lectures").select("id,title,youtube_url").eq("id", lectureId).maybeSingle()
+      );
 
-    if (error) {
-      console.warn("[lecture] load failed:", error.message);
-      // Never blow away an already-playing lecture over a background refresh hiccup.
-      if (!lecture) setErrorMsg(error.message);
-    } else if (!data) {
-      if (!lecture) setErrorMsg("This lecture could not be found.");
-    } else {
-      setLecture(data as any);
-      setErrorMsg(null);
+      if (error) {
+        console.warn("[lecture] load failed:", error.message);
+        // Never blow away an already-playing lecture over a background refresh hiccup.
+        if (!lecture) setErrorMsg(error.message);
+      } else if (!data) {
+        if (!lecture) setErrorMsg("This lecture could not be found.");
+      } else {
+        setLecture(data as any);
+        setErrorMsg(null);
+      }
+    } catch (err: any) {
+      // withTimeout rejects if the request hangs — without this, a slow or
+      // dropped connection would leave the spinner running forever.
+      console.warn("[lecture] load failed:", err);
+      if (!lecture) setErrorMsg(err?.message ?? "Couldn't load this lecture.");
     }
     setLoading(false);
     hasLoadedOnce.current = true;
