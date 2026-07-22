@@ -1,15 +1,17 @@
-import { View, ActivityIndicator, StyleSheet } from "react-native";
+import { useRouter } from "expo-router";
+import { useAuth } from "@/lib/auth-context";
+import { SplashIntro } from "@/components/SplashIntro";
 
-// This screen only ever shows briefly while _layout.tsx checks the session
-// and redirects to either /login or /(tabs)/dashboard.
 export default function IndexScreen() {
+  const { session, loading } = useAuth();
+  const router = useRouter();
+
   return (
-    <View style={styles.container}>
-      <ActivityIndicator color="#17358a" size="large" />
-    </View>
+    <SplashIntro
+      ready={!loading}
+      onFinish={() => {
+        router.replace(session ? "/(tabs)/dashboard" : "/login");
+      }}
+    />
   );
 }
-
-const styles = StyleSheet.create({
-  container: { flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: "#f7f8fc" },
-});
