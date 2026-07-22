@@ -38,14 +38,13 @@ function RootNavigation() {
     const onLoginScreen = segments[0] === "login";
     const onIndexScreen = segments.length === 0;
 
+    // The index screen (splash intro) now handles its own redirect once the
+    // animation finishes — don't race it with an immediate redirect here.
+    if (onIndexScreen) return;
+
     if (!session && !onLoginScreen) {
-      // Not logged in and not already on login -> send to login
       router.replace("/login");
-    } else if (session && (onLoginScreen || onIndexScreen)) {
-      // Logged in but sitting on index/login -> send to dashboard.
-      // (Only redirect from login/index — NOT from every screen outside
-      // (tabs), otherwise opening a batch/live-class/test bounces straight
-      // back to the dashboard.)
+    } else if (session && onLoginScreen) {
       router.replace("/(tabs)/dashboard");
     }
   }, [session, loading, segments]);
