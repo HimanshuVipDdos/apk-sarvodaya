@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import {
   View,
   Text,
@@ -14,13 +14,14 @@ import {
 import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
 import { StatusBar } from "expo-status-bar";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { WebView, type WebViewNavigation } from "react-native-webview";
+import * as ScreenOrientation from "expo-screen-orientation";
 import { Ionicons } from "@expo/vector-icons";
 import { supabase } from "@/lib/supabase";
 import { theme } from "@/lib/theme";
 import { withTimeout } from "@/lib/with-timeout";
 import { useLiveChat } from "@/lib/live-chat";
-import { extractYouTubeId, buildYouTubeEmbedHtml, describeYouTubeError } from "@/lib/youtube";
+import { extractYouTubeId } from "@/lib/youtube";
+import { YouTubePlayer, type YouTubePlayerHandle } from "@/components/YouTubePlayer";
 
 type LiveClassInfo = {
   id: string;
@@ -32,13 +33,6 @@ type LiveClassInfo = {
 
 const { width: SCREEN_W } = Dimensions.get("window");
 const PLAYER_HEIGHT = (SCREEN_W * 9) / 16;
-
-const ALLOWED_HOST_FRAGMENTS = ["youtube-nocookie.com", "youtube.com/embed", "ytimg.com", "googlevideo.com", "about:blank"];
-
-function isAllowedNavigation(url: string) {
-  if (url.startsWith("data:") || url.startsWith("blob:")) return true;
-  return ALLOWED_HOST_FRAGMENTS.some((frag) => url.includes(frag));
-}
 
 export default function LiveClassScreen() {
   const { liveClassId } = useLocalSearchParams<{ liveClassId: string }>();
@@ -54,19 +48,14 @@ export default function LiveClassScreen() {
   const savedRef = useRef(false);
   const listRef = useRef<FlatList>(null);
   const hasLoadedOnce = useRef(false);
+  const playerRef = useRef<YouTubePlayerHandle>(null);
 
-  const [videoReady, setVideoReady] = useState(false);
-  const [videoError, setVideoError] = useState<string | null>(null);
-  const [webviewKey, setWebviewKey] = useState(0);
-  const autoRetryCount = useRef(0);
-  const MAX_AUTO_RETRIES = 3;
-
-  function retryVideo() {
-    autoRetryCount.current = 0;
-    setVideoError(null);
-    setVideoReady(false);
-    setWebviewKey((k) => k + 1);
-  }
+  // Fullscreen: rotates to landscape and gives the video the whole screen.
+  // showChatInFullscreen: while fullscreen, tapping the chat bubble shrinks
+  // the video to the left (like YouTube's landscape split) and shows chat
+  // on the right, instead of leaving the app and hiding the video entirely.
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  const [showChatInFullscreen, setShowChatInFullscreen] = useState(false);
 
   const { messages, loading: chatLoading, send } = useLiveChat(liveClassId ?? "");
 
@@ -105,6 +94,31 @@ export default function LiveClassScreen() {
     }, [load])
   );
 
+  // Always leave fullscreen + relock portrait when this screen loses focus
+  // or unmounts, so the rest of the app never gets stuck in landscape.
+  useFocusEffect(
+    useCallback(() => {
+      return () => {
+        setIsFullscreen(false);
+        setShowChatInFullscreen(false);
+        ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT_UP).catch(() => {});
+      };
+    }, [])
+  );
+
+  const toggleFullscreen = useCallback(() => {
+    setIsFullscreen((prev) => {
+      const next = !prev;
+      if (next) {
+        ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.LANDSCAPE).catch(() => {});
+      } else {
+        setShowChatInFullscreen(false);
+        ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT_UP).catch(() => {});
+      }
+      return next;
+    });
+  }, []);
+
   const handleVideoEnded = useCallback(async () => {
     if (savedRef.current || !liveClass) return;
     savedRef.current = true;
@@ -133,38 +147,6 @@ export default function LiveClassScreen() {
     }
   }, [liveClass]);
 
-  function onWebViewMessage(event: { nativeEvent: { data: string } }) {
-    try {
-      const msg = JSON.parse(event.nativeEvent.data);
-      if (msg.type === "ended") handleVideoEnded();
-      if (msg.type === "ready") {
-        setVideoReady(true);
-        autoRetryCount.current = 0;
-      }
-      if (msg.type === "error") {
-        if (autoRetryCount.current < MAX_AUTO_RETRIES) {
-          autoRetryCount.current += 1;
-          setTimeout(() => {
-            setVideoReady(false);
-            setWebviewKey((k) => k + 1);
-          }, 2500);
-        } else {
-          setVideoError(describeYouTubeError(msg.data));
-        }
-      }
-    } catch {
-      // ignore malformed messages
-    }
-  }
-
-  function onWebViewError() {
-    setVideoError("Network error loading the video. Please check your internet connection.");
-  }
-
-  function onShouldStartLoad(request: WebViewNavigation) {
-    return isAllowedNavigation(request.url);
-  }
-
   if (loading) {
     return (
       <View style={styles.center}>
@@ -185,6 +167,109 @@ export default function LiveClassScreen() {
   }
 
   const videoId = extractYouTubeId(liveClass.youtube_url);
+  const isLive = liveClass.is_live && !ended;
+
+  const chatPanel = (
+    <View style={[styles.chatWrap, isFullscreen && styles.chatWrapFullscreen]}>
+      <FlatList
+        ref={listRef}
+        data={messages}
+        keyExtractor={(m) => m.id}
+        contentContainerStyle={{ padding: 12, gap: 8 }}
+        removeClippedSubviews
+        initialNumToRender={15}
+        maxToRenderPerBatch={10}
+        windowSize={10}
+        onContentSizeChange={() => listRef.current?.scrollToEnd({ animated: true })}
+        ListEmptyComponent={
+          chatLoading ? null : <Text style={styles.chatEmpty}>No messages yet — say hi 👋</Text>
+        }
+        renderItem={({ item }) => (
+          <View style={styles.chatRow}>
+            <Text style={[styles.chatName, item.is_moderator && styles.chatNameMod]}>
+              {item.user_name ?? "Student"}
+              {item.is_moderator ? " • Admin" : ""}
+            </Text>
+            <Text style={styles.chatMsg}>{item.message}</Text>
+          </View>
+        )}
+      />
+      <View style={styles.chatInputRow}>
+        <TextInput
+          style={styles.chatInput}
+          placeholder="Type a message…"
+          placeholderTextColor={theme.textMuted}
+          value={chatInput}
+          onChangeText={setChatInput}
+          maxLength={500}
+        />
+        <TouchableOpacity
+          style={[styles.sendBtn, sending && { opacity: 0.6 }]}
+          disabled={sending || !chatInput.trim()}
+          onPress={async () => {
+            if (!chatInput.trim() || sending) return;
+            const text = chatInput;
+            setChatInput("");
+            setSending(true);
+            try {
+              await send(text);
+            } catch (err: any) {
+              setChatInput(text);
+            } finally {
+              setSending(false);
+            }
+          }}
+        >
+          {sending ? <ActivityIndicator color="#fff" size="small" /> : <Ionicons name="send" size={16} color="#fff" />}
+        </TouchableOpacity>
+      </View>
+    </View>
+  );
+
+  const videoBox = videoId ? (
+    <View style={{ flex: 1, backgroundColor: "#000" }}>
+      <YouTubePlayer
+        ref={playerRef}
+        videoId={videoId}
+        isLive={isLive}
+        autoplay
+        onEnded={handleVideoEnded}
+        onFullscreenToggle={toggleFullscreen}
+      />
+    </View>
+  ) : (
+    <View style={[styles.center, { flex: 1 }]}>
+      <Text style={styles.errorText}>Video link not available for this class.</Text>
+    </View>
+  );
+
+  if (isFullscreen) {
+    return (
+      <View style={styles.fullscreenRoot}>
+        <StatusBar hidden />
+        <View style={{ flex: showChatInFullscreen ? 0.62 : 1 }}>{videoBox}</View>
+        {showChatInFullscreen ? chatPanel : null}
+
+        {/* Floating controls over the video — separate from the in-video
+            control bar so chat can be toggled without the WebView needing
+            to know anything about chat. */}
+        <TouchableOpacity
+          style={[styles.fsFloatingBtn, { left: insets.left + 10, top: insets.top + 8 }]}
+          onPress={toggleFullscreen}
+          hitSlop={10}
+        >
+          <Ionicons name="contract" size={18} color="#fff" />
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={[styles.fsFloatingBtn, { right: insets.right + 10, top: insets.top + 8 }]}
+          onPress={() => setShowChatInFullscreen((v) => !v)}
+          hitSlop={10}
+        >
+          <Ionicons name={showChatInFullscreen ? "chatbubble" : "chatbubble-outline"} size={18} color="#fff" />
+        </TouchableOpacity>
+      </View>
+    );
+  }
 
   return (
     <KeyboardAvoidingView
@@ -199,7 +284,7 @@ export default function LiveClassScreen() {
         <Text style={styles.topBarTitle} numberOfLines={1}>
           {liveClass.title}
         </Text>
-        {liveClass.is_live && !ended ? (
+        {isLive ? (
           <View style={styles.liveTag}>
             <Text style={styles.liveTagText}>● LIVE</Text>
           </View>
@@ -208,44 +293,7 @@ export default function LiveClassScreen() {
         )}
       </View>
 
-      {videoId ? (
-        <View style={{ width: SCREEN_W, height: PLAYER_HEIGHT, backgroundColor: "#000" }}>
-          <WebView
-            key={webviewKey}
-            source={{ html: buildYouTubeEmbedHtml(videoId, { autoplay: true }), baseUrl: "https://sarvodayadhyeta.online" }}
-            onMessage={onWebViewMessage}
-            onError={onWebViewError}
-            onHttpError={onWebViewError}
-            onShouldStartLoadWithRequest={onShouldStartLoad}
-            allowsFullscreenVideo
-            allowsInlineMediaPlayback
-            mediaPlaybackRequiresUserAction={false}
-            setSupportMultipleWindows={false}
-            javaScriptEnabled
-            domStorageEnabled
-            mixedContentMode="always"
-            style={{ flex: 1 }}
-          />
-          {!videoReady && !videoError ? (
-            <View style={styles.playerOverlay} pointerEvents="none">
-              <ActivityIndicator color="#fff" />
-            </View>
-          ) : null}
-          {videoError ? (
-            <View style={styles.playerOverlay}>
-              <Ionicons name="alert-circle-outline" size={26} color="#fff" style={{ marginBottom: 8 }} />
-              <Text style={styles.videoErrorText}>{videoError}</Text>
-              <TouchableOpacity style={styles.retryVideoBtn} onPress={retryVideo}>
-                <Text style={styles.retryVideoBtnText}>Retry</Text>
-              </TouchableOpacity>
-            </View>
-          ) : null}
-        </View>
-      ) : (
-        <View style={[styles.center, { height: PLAYER_HEIGHT }]}>
-          <Text style={styles.errorText}>Video link not available for this class.</Text>
-        </View>
-      )}
+      <View style={{ width: SCREEN_W, height: PLAYER_HEIGHT, backgroundColor: "#000" }}>{videoBox}</View>
 
       {ended ? (
         <View style={styles.endedBanner}>
@@ -254,60 +302,7 @@ export default function LiveClassScreen() {
         </View>
       ) : null}
 
-      <View style={styles.chatWrap}>
-        <FlatList
-          ref={listRef}
-          data={messages}
-          keyExtractor={(m) => m.id}
-          contentContainerStyle={{ padding: 12, gap: 8 }}
-          removeClippedSubviews
-          initialNumToRender={15}
-          maxToRenderPerBatch={10}
-          windowSize={10}
-          onContentSizeChange={() => listRef.current?.scrollToEnd({ animated: true })}
-          ListEmptyComponent={
-            chatLoading ? null : <Text style={styles.chatEmpty}>No messages yet — say hi 👋</Text>
-          }
-          renderItem={({ item }) => (
-            <View style={styles.chatRow}>
-              <Text style={[styles.chatName, item.is_moderator && styles.chatNameMod]}>
-                {item.user_name ?? "Student"}
-                {item.is_moderator ? " • Admin" : ""}
-              </Text>
-              <Text style={styles.chatMsg}>{item.message}</Text>
-            </View>
-          )}
-        />
-        <View style={styles.chatInputRow}>
-          <TextInput
-            style={styles.chatInput}
-            placeholder="Type a message…"
-            placeholderTextColor={theme.textMuted}
-            value={chatInput}
-            onChangeText={setChatInput}
-            maxLength={500}
-          />
-          <TouchableOpacity
-            style={[styles.sendBtn, sending && { opacity: 0.6 }]}
-            disabled={sending || !chatInput.trim()}
-            onPress={async () => {
-              if (!chatInput.trim() || sending) return;
-              const text = chatInput;
-              setChatInput("");
-              setSending(true);
-              try {
-                await send(text);
-              } catch (err: any) {
-                setChatInput(text);
-              } finally {
-                setSending(false);
-              }
-            }}
-          >
-            {sending ? <ActivityIndicator color="#fff" size="small" /> : <Ionicons name="send" size={16} color="#fff" />}
-          </TouchableOpacity>
-        </View>
-      </View>
+      {chatPanel}
     </KeyboardAvoidingView>
   );
 }
@@ -328,16 +323,6 @@ const styles = StyleSheet.create({
   topBarTitle: { flex: 1, color: "#fff", fontSize: 14, fontWeight: "700" },
   liveTag: { backgroundColor: "#dc2626", borderRadius: 10, paddingHorizontal: 8, paddingVertical: 4 },
   liveTagText: { color: "#fff", fontSize: 10, fontWeight: "700" },
-  playerOverlay: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: "rgba(0,0,0,0.75)",
-    alignItems: "center",
-    justifyContent: "center",
-    paddingHorizontal: 30,
-  },
-  videoErrorText: { color: "#fff", fontSize: 13, textAlign: "center", lineHeight: 19, marginBottom: 14 },
-  retryVideoBtn: { backgroundColor: theme.gold, borderRadius: 10, paddingHorizontal: 20, paddingVertical: 9 },
-  retryVideoBtnText: { color: theme.navyDark, fontWeight: "700", fontSize: 13 },
   endedBanner: {
     flexDirection: "row",
     alignItems: "center",
@@ -348,6 +333,7 @@ const styles = StyleSheet.create({
   },
   endedBannerText: { color: "#86efac", fontSize: 12, fontWeight: "600" },
   chatWrap: { flex: 1, backgroundColor: theme.cream },
+  chatWrapFullscreen: { flex: 0.38, borderLeftWidth: 1, borderLeftColor: "#000" },
   chatEmpty: { color: theme.textMuted, fontSize: 13, textAlign: "center", marginTop: 20 },
   chatRow: { backgroundColor: "#fff", borderRadius: 10, padding: 10, borderWidth: 1, borderColor: theme.border },
   chatName: { fontSize: 11, fontWeight: "700", color: theme.navy, marginBottom: 2 },
@@ -371,4 +357,14 @@ const styles = StyleSheet.create({
     color: theme.textPrimary,
   },
   sendBtn: { backgroundColor: theme.navy, borderRadius: 20, width: 38, height: 38, alignItems: "center", justifyContent: "center" },
+  fullscreenRoot: { flex: 1, flexDirection: "row", backgroundColor: "#000" },
+  fsFloatingBtn: {
+    position: "absolute",
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    backgroundColor: "rgba(0,0,0,0.45)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
 });
