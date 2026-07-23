@@ -11,7 +11,7 @@ import { withTimeout } from "@/lib/with-timeout";
 import { extractYouTubeId } from "@/lib/youtube";
 import { YouTubePlayer, type YouTubePlayerHandle } from "@/components/YouTubePlayer";
 
-type LectureInfo = { id: string; title: string; youtube_url: string | null };
+type LectureInfo = { id: string; title: string; video_url: string | null };
 
 const { width: SCREEN_W } = Dimensions.get("window");
 const PLAYER_HEIGHT = (SCREEN_W * 9) / 16;
@@ -38,7 +38,7 @@ export default function LectureScreen() {
     if (!hasLoadedOnce.current) setLoading(true);
     try {
       const { data, error } = await withTimeout(
-        supabase.from("lectures").select("id,title,youtube_url").eq("id", lectureId).maybeSingle()
+        supabase.from("lectures").select("id,title,video_url").eq("id", lectureId).maybeSingle()
       );
 
       if (error) {
@@ -108,7 +108,7 @@ export default function LectureScreen() {
     );
   }
 
-  const videoId = extractYouTubeId(lecture.youtube_url);
+  const videoId = extractYouTubeId(lecture.video_url);
 
   const videoBox = videoId ? (
     <View style={{ flex: 1, backgroundColor: "#000" }}>
