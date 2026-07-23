@@ -1,18 +1,33 @@
-import { View, Text, StyleSheet, ScrollView } from "react-native";
-import { useRouter } from "expo-router";
+import { View, Text, StyleSheet, ScrollView, ActivityIndicator } from "react-native";
+import { useRouter, Redirect } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { theme } from "@/lib/theme";
+import { useIsAdmin } from "@/lib/is-admin";
 import { RiseIn, PressScale } from "@/components/Motion";
 
 export default function AdminHomeScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
+  const { isAdmin, checked } = useIsAdmin();
+
+  if (!checked) {
+    return (
+      <View style={{ flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: theme.cream }}>
+        <ActivityIndicator color={theme.navy} />
+      </View>
+    );
+  }
+
+  if (!isAdmin) {
+    return <Redirect href="/(tabs)/dashboard" />;
+  }
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={{ padding: 20, paddingTop: insets.top + 24 }}>
       <RiseIn>
         <Text style={styles.heading}>Admin Tools</Text>
+
         <Text style={styles.subheading}>
           Quick actions from your phone. For full control (question bank, bulk uploads, AI
           parser, enrollments, results etc.) use the website admin panel — everything you do
