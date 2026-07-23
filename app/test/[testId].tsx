@@ -13,6 +13,7 @@ import {
 } from "react-native";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import {
   startCbtAttempt,
   submitCbtAttempt,
@@ -129,7 +130,10 @@ export default function TestTakingScreen() {
   const answersRef = useRef(answers);
   useEffect(() => {
     answersRef.current = answers;
-  }, [answers]);
+    if (attemptId) {
+      AsyncStorage.setItem(`cbt_answers_${attemptId}`, JSON.stringify(answers)).catch(() => {});
+    }
+  }, [answers, attemptId]);
   // Keeps TimerPill's onExpire prop referentially stable across re-renders
   // (e.g. every time an answer is picked) so its internal interval doesn't
   // get torn down and recreated for no reason.
@@ -151,6 +155,16 @@ export default function TestTakingScreen() {
         setAttemptId(res.attempt_id);
         setTestTitle(res.test.title);
         setQuestions(res.questions);
+        // Restore any answers saved locally before a previous crash / kill /
+        // dropped connection — the server only has answers we've already
+        // submitted, so this local copy is the only record of in-progress
+        // selections between submits.
+        try {
+          const cached = await AsyncStorage.getItem(`cbt_answers_${res.attempt_id}`);
+          if (cached) setAnswers(JSON.parse(cached));
+        } catch {
+          // Corrupt/unreadable cache — safe to ignore, just start blank.
+        }
         if (res.test.duration_minutes) {
           // Absolute deadline (not a countdown that drifts) — matches the
           // ref-based timer fix already used on the website.
@@ -230,6 +244,7 @@ export default function TestTakingScreen() {
 
     try {
       await submitCbtAttempt(attemptId, payload);
+      AsyncStorage.removeItem(`cbt_answers_${attemptId}`).catch(() => {});
       router.replace({ pathname: "/test/result/[attemptId]", params: { attemptId } });
     } catch (e: any) {
       setSubmitting(false);
