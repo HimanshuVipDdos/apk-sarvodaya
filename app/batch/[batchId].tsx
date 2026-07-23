@@ -7,7 +7,7 @@ import { theme } from "@/lib/theme";
 import { withTimeout } from "@/lib/with-timeout";
 
 type LiveClass = { id: string; title: string; is_live: boolean; scheduled_at: string; youtube_url: string | null };
-type Lecture = { id: string; title: string; lecture_number: number | null; youtube_url: string | null };
+type Lecture = { id: string; title: string; lecture_number: number | null; video_url: string | null };
 type CbtTest = { id: string; title: string; duration_minutes: number | null };
 type Material = { id: string; title: string; file_url: string | null; material_type: string | null };
 type BatchInfo = {
@@ -100,7 +100,7 @@ export default function BatchDetailScreen() {
     setLectures((s) => ({ ...s, loading: !loadedOnce.current.lectures, error: null }));
     try {
       const res = await withTimeout(
-        supabase.from("lectures").select("id,title,lecture_number,youtube_url").eq("batch_id", batchId).eq("is_published", true).order("lecture_number", { ascending: true })
+        supabase.from("lectures").select("id,title,lecture_number,video_url").eq("batch_id", batchId).eq("is_published", true).order("lecture_number", { ascending: true })
       );
       if (!mountedRef.current) return;
       if (res.error) throw res.error;
